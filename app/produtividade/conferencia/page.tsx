@@ -185,7 +185,7 @@ function Page() {
               do dia
               <Tabs.Indicator />
             </Tabs.Tab>
-            <Tabs.Tab id="range" isDisabled={process.env.NODE_ENV !== "development"}>
+            <Tabs.Tab id="range">
               de periodo
               <Tabs.Indicator />
             </Tabs.Tab>
