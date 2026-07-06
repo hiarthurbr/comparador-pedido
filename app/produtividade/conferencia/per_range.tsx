@@ -1,19 +1,12 @@
 "use client";
 
-import { Description, Label, ProgressBar, Tabs } from "@heroui/react";
+import { type DateRange, Description, Label, ProgressBar, Tabs } from "@heroui/react";
 import { type DateValue, fromDate, now } from "@internationalized/date";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { Grid2x2XIcon } from "lucide-react";
-import {
-  type Dispatch,
-  type SetStateAction,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { type Dispatch, type SetStateAction, useContext, useEffect, useState } from "react";
 import { z } from "zod";
-import type { produtividade_conferencia_day_schema } from "@/lib/schemas";
+import type { produtividade_conferencia_range_schema } from "@/lib/schemas";
 import { get_relatorio_conferencia } from "./get_data";
 import { QUERY_KEY, SelectedSectionContext } from "./page";
 import skus_pre from "./skus.json";
@@ -23,7 +16,6 @@ import { UsersTable } from "./users-table";
 
 const skus = z.record(z.string(), z.number().positive().catch(1)).parse(skus_pre);
 
-export const horas_trabalhadas = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
 export const marcadores: Array<{
   label: string;
   momento: { hh: number; mm: number };
@@ -42,72 +34,74 @@ export const NAME_KEYS = {
   pedidos_conferidos: "N° de pedidos conferidos",
 } as const;
 
-export default function PerDay({
-  date,
+export default function PerRange({
+  date_range,
   meta,
   timezone,
   setUpdatedAt,
   setAverage,
 }: {
-  date: DateValue;
+  date_range: DateRange;
   meta: number;
   timezone: string;
   setUpdatedAt: Dispatch<SetStateAction<number>>;
   setAverage: Dispatch<SetStateAction<{ mean: number; median: number }>>;
 }) {
-  const now_ = now(timezone);
+  const [dates, setDates] = useState<DateValue[]>([]);
 
-  const hours_filter = useMemo(
-    () =>
-      horas_trabalhadas.map(
-        (h) =>
-          [
-            h,
-            new Date(date.toDate(timezone).getTime() + h * 1000 * 60 * 60),
-            new Date(date.toDate(timezone).getTime() + (h + 1) * 1000 * 60 * 60),
-          ] as const,
-      ),
-    [date, timezone],
-  );
-  const { data, isFetching, dataUpdatedAt, isPending } = useQuery({
-    queryKey: [QUERY_KEY, date] as const,
-    queryFn: () => get_relatorio_conferencia(date.toDate(timezone)),
-    refetchInterval: 1000 * 60 * 60,
-    refetchOnReconnect: true,
-    refetchOnWindowFocus: true,
-    staleTime: (query) =>
-      now_.set({ hour: 0, minute: 0, second: 0, millisecond: 0 }).compare(query.queryKey[1]) > 0
-        ? "static"
-        : 1000 * 60 * 15,
-    placeholderData: (previousData, _) => previousData,
-    throwOnError(error, query) {
-      console.log({ error, query });
-      return false;
-    },
-    networkMode: "offlineFirst",
-    // enabled: false,
+  useEffect(() => {
+    const arr: DateValue[] = [];
+
+    let curr = date_range.start;
+
+    while (curr.compare(date_range.end) <= 0) {
+      arr.push(curr);
+      curr = curr.add({ days: 1 });
+    }
+
+    setDates(arr);
+  }, [date_range]);
+
+  const { data, isPending, progress } = useQueries({
+    queries: dates.map((date) => ({
+      queryKey: [QUERY_KEY, date] as const,
+      queryFn: () => get_relatorio_conferencia(date.toDate(timezone)),
+      staleTime: "static",
+      networkMode: "offlineFirst",
+      // enabled: false,
+    })),
+    combine: (results) => ({
+      data: results.flatMap((result) => result.data).filter((data) => data != null),
+      isPending: results.some((result) => result.isPending),
+      progress: {
+        total: results.length,
+        done: results.filter((r) => !r.isPending).length,
+      },
+    }),
   });
 
   useEffect(() => {
-    setUpdatedAt(dataUpdatedAt);
-  }, [setUpdatedAt, dataUpdatedAt]);
+    setUpdatedAt(0);
+  }, [setUpdatedAt]);
 
-  const [{ per_user, per_hour, average }, setData] = useState<
-    Omit<z.infer<typeof produtividade_conferencia_day_schema>, "meta" | "avg"> & {
+  const [{ per_user, per_day, average }, setData] = useState<
+    Omit<z.infer<typeof produtividade_conferencia_range_schema>, "meta" | "avg"> & {
       average: {
         mean: number;
         median: number;
       } | null;
     }
-  >({ per_hour: null, per_user: null, average: null });
+  >({ per_day: null, per_user: null, average: null });
 
   useEffect(() => {
-    if (data == null) return;
+    if (isPending) return;
     const now_ = now(timezone);
+
+    const users = Array.from(new Set(data.map((e) => e.usuario)));
 
     const result = {
       per_user: Object.fromEntries(
-        Array.from(new Set(data.map((e) => e.usuario)))
+        users
           .map((user) => data.filter((cx) => cx.usuario === user))
           .map((data) => {
             const produtos = Object.entries(
@@ -131,49 +125,80 @@ export default function PerDay({
 
             const pedidos_conferidos = new Set(data.map((cx) => cx.codigoPedido));
 
-            const hora_inicio = Math.min(...data.map((cx) => cx.montagem.getTime()));
-            const hora_fim = Math.max(...data.map((cx) => cx.montagem.getTime()));
+            const cx_p_dia = dates.map(
+              (date) =>
+                [
+                  date,
+                  data.filter((cx) => {
+                    const montagem = fromDate(cx.montagem, timezone);
 
-            const horas_conferidas = Math.abs(hora_fim - hora_inicio) / 3_600_000;
+                    const start = now_.set({
+                      year: date.year,
+                      month: date.month,
+                      day: date.day,
+                      hour: 0,
+                      minute: 0,
+                      second: 0,
+                      millisecond: 0,
+                    });
 
-            const por_hora = hours_filter
-              .filter(([, start]) => start <= now_.toDate())
-              .map(
-                ([hour, start, end]) =>
-                  [
-                    hour,
-                    data.filter(
-                      (cx) =>
-                        fromDate(cx.montagem, timezone).compare(fromDate(start, timezone)) > 0 &&
-                        fromDate(cx.montagem, timezone).compare(fromDate(end, timezone)) < 0,
-                    ),
-                  ] as const,
-              )
-              .map(
-                ([hour, data]) =>
-                  [
-                    hour,
-                    {
-                      total_embalagens: Object.entries(
-                        data.reduce(
-                          (obj, prod) => {
-                            if (prod.produto in obj) obj[prod.produto] += prod.quantidade;
-                            else obj[prod.produto] = prod.quantidade;
-                            return obj;
-                          },
-                          {} as Record<string, number>,
-                        ),
+                    const end = now_.set({
+                      year: date.year,
+                      month: date.month,
+                      day: date.day,
+                      hour: 23,
+                      minute: 59,
+                      second: 59,
+                      millisecond: 999,
+                    });
+
+                    return montagem.compare(start) >= 0 && montagem.compare(end) <= 0;
+                  }),
+                ] as const,
+            );
+
+            const horas_conferidas = cx_p_dia
+              .map(([, cxs]) => {
+                if (cxs.length === 0) return 0
+
+                const hora_inicio = Math.min(...cxs.map((cx) => cx.montagem.getTime()));
+                const hora_fim = Math.max(...cxs.map((cx) => cx.montagem.getTime()));
+
+                const horas_conferidas = Math.abs(hora_fim - hora_inicio) / 3_600_000;
+
+                console.log({ hora_inicio, hora_fim, horas_conferidas})
+
+                return horas_conferidas
+              })
+              .reduce((a, b) => a + b, 0);
+
+            console.log({ cx_p_dia, horas_conferidas });
+
+            const por_dia = cx_p_dia.map(
+              ([hour, data]) =>
+                [
+                  hour.toDate(timezone).toISOString(),
+                  {
+                    total_embalagens: Object.entries(
+                      data.reduce(
+                        (obj, prod) => {
+                          if (prod.produto in obj) obj[prod.produto] += prod.quantidade;
+                          else obj[prod.produto] = prod.quantidade;
+                          return obj;
+                        },
+                        {} as Record<string, number>,
+                      ),
+                    )
+                      .map(
+                        ([produto, quantidade]) =>
+                          quantidade / (skus[produto as keyof typeof skus] ?? 1),
                       )
-                        .map(
-                          ([produto, quantidade]) =>
-                            quantidade / (skus[produto as keyof typeof skus] ?? 1),
-                        )
-                        .reduce((a, b) => a + b, 0),
-                      pedidos_conferidos: new Set(data.map((cx) => cx.codigoPedido)),
-                      caixas: new Set(data.map((cx) => cx.caixa)),
-                    },
-                  ] as const,
-              );
+                      .reduce((a, b) => a + b, 0),
+                    pedidos_conferidos: new Set(data.map((cx) => cx.codigoPedido)),
+                    caixas: new Set(data.map((cx) => cx.caixa)),
+                  },
+                ] as const,
+            );
 
             const pedidos_por_hora = pedidos_conferidos.size / horas_conferidas;
 
@@ -187,30 +212,56 @@ export default function PerDay({
                 total_embalagens,
                 pedidos_conferidos,
                 caixas,
-                por_hora: Object.fromEntries(por_hora),
+                por_dia: Object.fromEntries(por_dia),
                 pedidos_por_hora,
                 caixas_por_hora,
                 embalagens_por_hora: total_embalagens / horas_conferidas,
-                hora_inicio: new Date(hora_inicio),
-                hora_fim: new Date(hora_fim),
-                duração: Math.floor(Math.abs(hora_inicio - hora_fim) / 60_000),
+                hora_inicio: null,
+                hora_fim: null,
+                duração: Math.floor(horas_conferidas * 60),
                 produtos,
                 meta,
               },
             ];
           }),
       ),
-      per_hour: Object.fromEntries(
-        hours_filter
-          .filter(([, start]) => start <= now_.toDate())
+      per_day: Object.fromEntries(
+        dates
           .map(
-            ([hour, start, end]) =>
-              [hour, data.filter((cx) => cx.montagem >= start && cx.montagem < end)] as const,
+            (date) =>
+              [
+                date.toDate(timezone).toISOString(),
+                data.filter((cx) => {
+                  const montagem = fromDate(cx.montagem, timezone);
+
+                  const start = now_.set({
+                    year: date.year,
+                    month: date.month,
+                    day: date.day,
+                    hour: 0,
+                    minute: 0,
+                    second: 0,
+                    millisecond: 0,
+                  });
+
+                  const end = now_.set({
+                    year: date.year,
+                    month: date.month,
+                    day: date.day,
+                    hour: 23,
+                    minute: 59,
+                    second: 59,
+                    millisecond: 999,
+                  });
+
+                  return montagem.compare(start) >= 0 && montagem.compare(end) <= 0;
+                }),
+              ] as const,
           )
           .map(
-            ([hour, data]) =>
+            ([date, data]) =>
               [
-                hour,
+                date,
                 {
                   total_embalagens: Math.round(
                     Object.entries(
@@ -254,13 +305,20 @@ export default function PerDay({
     setData({ ...result, average });
 
     setAverage(average);
-  }, [data, hours_filter, meta, timezone, setAverage]);
+  }, [data, meta, timezone, dates.map, isPending, setAverage]);
 
   const selectedSectionState = useContext(SelectedSectionContext);
 
   return isPending ? (
     <div className="flex flex-col items-center pt-32">
-      <ProgressBar size="lg" isIndeterminate aria-label="Loading" className="w-64">
+      <ProgressBar
+        size="lg"
+        isIndeterminate={progress.total === 0}
+        maxValue={progress.total}
+        value={progress.done}
+        aria-label="Loading"
+        className="w-64"
+      >
         <Label className="mb-3.5 mt-5">Carregando dados</Label>
         <ProgressBar.Track>
           <ProgressBar.Fill />
@@ -276,7 +334,6 @@ export default function PerDay({
   ) : (
     <Tabs
       className="min-w-full"
-      aria-label="Seleção de tela"
       onSelectionChange={(key) => selectedSectionState?.[1](key as string)}
       selectedKey={selectedSectionState?.[0] ?? "overview"}
     >
@@ -297,7 +354,7 @@ export default function PerDay({
         </Tabs.List>
       </Tabs.ListContainer>
       <Tabs.Panel className="pt-4" id="overview">
-        <UsersTable data={{ per_user, per_hour, meta, avg: average }} isFetching={isFetching} />
+        <UsersTable data={{ per_user, per_day, meta, avg: average }} isFetching={isPending} />
       </Tabs.Panel>
       <Tabs.Panel className="pt-4" id="analytics">
         <UserDashboard data={per_user ?? {}} />

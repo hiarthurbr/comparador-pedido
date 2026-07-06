@@ -14,8 +14,9 @@ import { TriangleAlertIcon } from "lucide-react";
 import { useContext, useEffect, useMemo, useState } from "react";
 import { Area, AreaChart, CartesianGrid, Tooltip as ChartTooltip, XAxis, YAxis } from "recharts";
 import type z from "zod";
+import type { produtividade_conferencia_schema } from "@/lib/schemas";
 import { duration } from "@/lib/utils";
-import { type per_user_schema, SelectedUserContext } from "./page";
+import { SelectedUserContext } from "./page";
 
 const NAME_KEYS = {
   total_embalagens: "N° de embalagens",
@@ -23,7 +24,11 @@ const NAME_KEYS = {
   pedidos_conferidos: "N° de pedidos",
 } as const;
 
-export function UserDashboard({ data }: { data: z.infer<typeof per_user_schema> }) {
+export function UserDashboard({
+  data,
+}: {
+  data: NonNullable<z.infer<typeof produtividade_conferencia_schema>["per_user"]>;
+}) {
   const [graphKey, setGraphKey] = useState("total_embalagens");
   const userNames = useMemo(() => Object.keys(data), [data]);
   const selectedUserState = useContext(SelectedUserContext);
@@ -42,30 +47,28 @@ export function UserDashboard({ data }: { data: z.infer<typeof per_user_schema> 
 
   const meta_percentage = ((userData.embalagens_por_hora / userData.meta) * 100) >> 0;
 
-  const hourlyData = Object.entries(userData.por_hora)
-    .filter(
-      ([hour]) =>
-        Number(hour) >= userData.hora_inicio.getHours() &&
-        Number(hour) <= userData.hora_fim.getHours(),
-    )
-    .map(([hour, data]) => ({
-      hour: `${hour}h`,
-      [NAME_KEYS.total_embalagens]: data.total_embalagens,
-      [NAME_KEYS.caixas]: data.caixas.size,
-      [NAME_KEYS.pedidos_conferidos]: data.pedidos_conferidos.size,
-    }));
-
-  console.log(
-    Object.values(data)
-      .filter((x) => Number.isFinite(x.caixas_por_hora))
-      .reduce(
-        ([min, max], curr) => [
-          Math.min(min, curr.caixas_por_hora),
-          Math.max(max, curr.caixas_por_hora),
-        ],
-        [Number.MAX_SAFE_INTEGER, Number.MIN_SAFE_INTEGER],
-      ),
-  );
+  const hourlyData = (
+    "por_hora" in userData
+      ? Object.entries(userData.por_hora).filter(
+          ([hour]) =>
+            Number(hour) >= userData.hora_inicio.getHours() &&
+            Number(hour) <= userData.hora_fim.getHours(),
+        )
+      : Object.entries(userData.por_dia)
+  ).map(([hora, data]) => ({
+    hora:
+      "per_hour" in data
+        ? `${hora}h`
+        : new Date(hora).toLocaleString("pt-BR", {
+            year: "numeric",
+            month: "long",
+            weekday: "long",
+            day: "numeric",
+          }),
+    [NAME_KEYS.total_embalagens]: data.total_embalagens,
+    [NAME_KEYS.caixas]: data.caixas.size,
+    [NAME_KEYS.pedidos_conferidos]: data.pedidos_conferidos.size,
+  }));
 
   return (
     <div className="space-y-6">
@@ -116,7 +119,9 @@ export function UserDashboard({ data }: { data: z.infer<typeof per_user_schema> 
           <Card.Content>
             <div className="text-2xl font-bold text-cyan-500 flex flex-row items-center space-x-2">
               <span className="-translate-y-0.5">
-                {userData.embalagens_por_hora.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
+                {userData.embalagens_por_hora.toLocaleString("pt-BR", {
+                  maximumFractionDigits: 1,
+                })}
               </span>
               {userData.duração < 60 && (
                 <UITooltip delay={0}>
@@ -138,7 +143,10 @@ export function UserDashboard({ data }: { data: z.infer<typeof per_user_schema> 
                   meta_percentage >= 100 ? "success" : meta_percentage >= 80 ? "warning" : "danger"
                 }
               >
-                {meta_percentage.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}% da meta
+                {meta_percentage.toLocaleString("pt-BR", {
+                  maximumFractionDigits: 0,
+                })}
+                % da meta
               </Chip>
             </div>
           </Card.Content>
@@ -159,7 +167,9 @@ export function UserDashboard({ data }: { data: z.infer<typeof per_user_schema> 
           </Card.Header>
           <Card.Content>
             <div className="text-2xl font-bold text-amber-500">
-              {userData.pedidos_por_hora.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
+              {userData.pedidos_por_hora.toLocaleString("pt-BR", {
+                maximumFractionDigits: 1,
+              })}
             </div>
           </Card.Content>
         </Card>
@@ -174,7 +184,12 @@ export function UserDashboard({ data }: { data: z.infer<typeof per_user_schema> 
             <div className="h-80">
               {graphKey === "geral" ? (
                 <AreaChart
-                  style={{ width: "100%", maxWidth: "2000px", maxHeight: "30vh", aspectRatio: 2 }}
+                  style={{
+                    width: "100%",
+                    maxWidth: "2000px",
+                    maxHeight: "30vh",
+                    aspectRatio: 2,
+                  }}
                   responsive
                   data={hourlyData}
                   margin={{ top: 10, right: 0, left: 0, bottom: 0 }}
@@ -230,7 +245,12 @@ export function UserDashboard({ data }: { data: z.infer<typeof per_user_schema> 
                 </AreaChart>
               ) : (
                 <AreaChart
-                  style={{ width: "100%", maxWidth: "2000px", maxHeight: "30vh", aspectRatio: 2 }}
+                  style={{
+                    width: "100%",
+                    maxWidth: "2000px",
+                    maxHeight: "30vh",
+                    aspectRatio: 2,
+                  }}
                   responsive
                   data={hourlyData}
                   margin={{ top: 10, right: 0, left: 0, bottom: 0 }}

@@ -28,14 +28,11 @@ import { Area, AreaChart, CartesianGrid, Tooltip as ChartTooltip, XAxis, YAxis }
 import type z from "zod";
 import type { produtividade_conferencia_schema } from "@/lib/schemas";
 import { duration, SortableColumnHeader, toSortDescriptor, toSortingState } from "@/lib/utils";
-import {
-  NAME_KEYS,
-  type per_user_schema,
-  SelectedSectionContext,
-  SelectedUserContext,
-} from "./page";
+import { NAME_KEYS, SelectedSectionContext, SelectedUserContext } from "./page";
 
-type ProductsTableData = z.infer<typeof per_user_schema>[string]["produtos"];
+type ProductsTableData = NonNullable<
+  z.infer<typeof produtividade_conferencia_schema>["per_user"]
+>[string]["produtos"];
 const columnHelperProducts = createColumnHelper<ProductsTableData[number]>();
 
 const columnsProducts = [
@@ -200,7 +197,9 @@ function ProdutsTable({ data }: { data: ProductsTableData }) {
 }
 
 const columnHelper = createColumnHelper<
-  z.infer<typeof per_user_schema>[string] & { name: string }
+  NonNullable<z.infer<typeof produtividade_conferencia_schema>["per_user"]>[string] & {
+    name: string;
+  }
 >();
 const columns = [
   columnHelper.accessor("name", {
@@ -310,9 +309,9 @@ const columns = [
       return Number.isFinite(info.getValue().embalagens_por_hora) ? (
         <span className="w-full flex flex-row justify-between items-center">
           <span>
-            {info
-              .getValue()
-              .embalagens_por_hora.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
+            {info.getValue().embalagens_por_hora.toLocaleString("pt-BR", {
+              maximumFractionDigits: 1,
+            })}
           </span>
           <span className="flex flex-row items-center">
             {info.row.original.duração <= 60 && (
@@ -334,7 +333,10 @@ const columns = [
                 meta_percentage >= 100 ? "success" : meta_percentage >= 80 ? "warning" : "danger"
               }
             >
-              {meta_percentage.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%
+              {meta_percentage.toLocaleString("pt-BR", {
+                maximumFractionDigits: 0,
+              })}
+              %
             </Chip>
           </span>
         </span>
@@ -343,11 +345,16 @@ const columns = [
       );
     },
   }),
+  columnHelper.accessor("duração", {
+    header: "Duração",
+    sortingFn: "basic",
+    cell: (info) => duration(info.getValue()),
+  }),
   columnHelper.accessor("hora_inicio", {
     header: "Hora Inicio",
     sortingFn: "datetime",
     cell: (info) =>
-      info.getValue().toLocaleTimeString("pt-BR", {
+      info.getValue()?.toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
       }),
@@ -356,15 +363,10 @@ const columns = [
     header: "Hora Fim",
     sortingFn: "datetime",
     cell: (info) =>
-      info.getValue().toLocaleTimeString("pt-BR", {
+      info.getValue()?.toLocaleTimeString("pt-BR", {
         hour: "2-digit",
         minute: "2-digit",
       }),
-  }),
-  columnHelper.accessor("duração", {
-    header: "Duração",
-    sortingFn: "basic",
-    cell: (info) => duration(info.getValue()),
   }),
 ];
 
@@ -383,12 +385,16 @@ export function UsersTable({
     },
   ]);
   const users = useMemo(
-    () => Object.entries(data.per_user ?? {}).map(([name, data]) => ({ ...data, name })),
+    () =>
+      Object.entries(data.per_user ?? {}).map(([name, data]) => ({
+        ...data,
+        name,
+      })),
     [data.per_user],
   );
 
   const table = useReactTable({
-    columns,
+    columns: "per_hour" in data ? columns : columns.filter((_, i) => i !== 6 && i !== 7),
     data: users,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -496,10 +502,10 @@ export function UsersTable({
           )}
         </Description>
       ),
-      hora_fim: (
+      duração: (
         <Pagination size="sm">
           <Pagination.Summary>
-            {start} to {end} of {users.length} results
+            {start}-{end} de {users.length}
           </Pagination.Summary>
           <Pagination.Content>
             <Pagination.Item>
@@ -566,26 +572,32 @@ export function UsersTable({
     return () => clearInterval(id);
   }, [footer_values, get_footer_offset, table.getHeaderGroups]);
 
-  console.log(Object.values(data.per_user ?? {}).map((x) => x.por_hora));
-  const graph_data = useMemo(
-    () =>
-      Object.entries(data.per_hour ?? {}).map(
-        ([hora, { caixas, pedidos_conferidos, total_embalagens }]) => ({
-          hora: `${hora}h`,
-          [NAME_KEYS.caixas]: caixas.size,
-          [NAME_KEYS.pedidos_conferidos]: pedidos_conferidos.size,
-          [NAME_KEYS.total_embalagens]: total_embalagens,
-        }),
-      ),
-    [data.per_hour],
+  const graph_data = Object.entries(("per_hour" in data ? data.per_hour : data.per_day) ?? {}).map(
+    ([hora, { caixas, pedidos_conferidos, total_embalagens }]) => ({
+      hora:
+        "per_hour" in data
+          ? `${hora}h`
+          : new Date(hora).toLocaleString("pt-BR", {
+              year: "numeric",
+              month: "long",
+              weekday: "long",
+              day: "numeric",
+            }),
+      [NAME_KEYS.caixas]: caixas.size,
+      [NAME_KEYS.pedidos_conferidos]: pedidos_conferidos.size,
+      [NAME_KEYS.total_embalagens]: total_embalagens,
+    }),
   );
-
-  console.log(graph_data);
 
   return (
     <div className="flex flex-col justify-center">
       <AreaChart
-        style={{ width: "100%", maxWidth: "2000px", maxHeight: "30vh", aspectRatio: 2 }}
+        style={{
+          width: "100%",
+          maxWidth: "2000px",
+          maxHeight: "30vh",
+          aspectRatio: 2,
+        }}
         responsive
         data={graph_data}
         margin={{ top: 10, right: 0, left: 0, bottom: 0 }}

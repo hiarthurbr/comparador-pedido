@@ -1,9 +1,9 @@
+import { queue } from "@tanstack/react-pacer/queuer";
 import Dexie, { type Table } from "dexie";
 import type z from "zod";
 import { getToken } from "@/lib/pda";
 import { montagem_caixa_schema } from "@/lib/schemas";
 import { fmt_date } from "@/lib/utils";
-import { queue } from "@tanstack/react-pacer/queuer";
 
 // --- CLASSE DO BANCO DE DADOS ---
 export class ProdutividadeConferencia extends Dexie {
@@ -57,9 +57,12 @@ const request_queue = queue(
       .then(montagem_caixa_schema.array().parseAsync)
       .then(callback),
   {
-    wait: 1000, // Or after 2 seconds
+    wait: 2000, // Or after 2 seconds
     onItemsChange: (queuer) => {
-      console.log("Current request queue:", queuer.peekAllItems().map(([date, _]) => fmt_date(date)));
+      console.log(
+        "Current request queue:",
+        queuer.peekAllItems().map(([date, _]) => fmt_date(date)),
+      );
     },
   },
 );

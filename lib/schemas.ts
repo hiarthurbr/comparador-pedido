@@ -327,38 +327,7 @@ export const montagem_caixa_schema = z.object({
   descTipoCaixa: z.string(),
 });
 
-export const per_user_schema = z.record(
-  z.string(),
-  z.object({
-    total_embalagens: z.number(),
-    pedidos_conferidos: z.set(z.string()),
-    caixas: z.set(z.string()),
-    por_hora: z.record(
-      z.string(),
-      z.object({
-        total_embalagens: z.number(),
-        pedidos_conferidos: z.set(z.string()),
-        caixas: z.set(z.string()),
-      }),
-    ),
-    produtos: z.array(
-      z.object({
-        sku: z.string(),
-        quantidade_pre: z.number(),
-        multiplo: z.number().optional().nullable(),
-      }),
-    ),
-    pedidos_por_hora: z.number(),
-    caixas_por_hora: z.number(),
-    embalagens_por_hora: z.number(),
-    hora_inicio: z.date(),
-    hora_fim: z.date(),
-    duração: z.number(),
-    meta: z.number(),
-  }),
-);
-
-export const per_hour_schema = z.record(
+const user_history_schema = z.record(
   z.string(),
   z.object({
     total_embalagens: z.number(),
@@ -367,9 +336,49 @@ export const per_hour_schema = z.record(
   }),
 );
 
-export const produtividade_conferencia_schema = z.object({
-  per_user: per_user_schema.nullable(),
-  per_hour: per_hour_schema.nullable(),
+const per_user_day_schema = z.object({
+  total_embalagens: z.number(),
+  pedidos_conferidos: z.set(z.string()),
+  caixas: z.set(z.string()),
+  produtos: z.array(
+    z.object({
+      sku: z.string(),
+      quantidade_pre: z.number(),
+      multiplo: z.number().optional().nullable(),
+    }),
+  ),
+  pedidos_por_hora: z.number(),
+  caixas_por_hora: z.number(),
+  embalagens_por_hora: z.number(),
+  hora_inicio: z.date(),
+  hora_fim: z.date(),
+  duração: z.number(),
+  meta: z.number(),
+  por_hora: user_history_schema,
+});
+
+const per_user_range_schema = z.object({
+  total_embalagens: z.number(),
+  pedidos_conferidos: z.set(z.string()),
+  caixas: z.set(z.string()),
+  produtos: z.array(
+    z.object({
+      sku: z.string(),
+      quantidade_pre: z.number(),
+      multiplo: z.number().optional().nullable(),
+    }),
+  ),
+  pedidos_por_hora: z.number(),
+  caixas_por_hora: z.number(),
+  embalagens_por_hora: z.number(),
+  hora_inicio: z.date().nullable(),
+  hora_fim: z.date().nullable(),
+  duração: z.number(),
+  meta: z.number(),
+  por_dia: user_history_schema,
+});
+
+export const produtividade_conferencia_day_schema = z.object({
   meta: z.number(),
   avg: z
     .object({
@@ -377,4 +386,23 @@ export const produtividade_conferencia_schema = z.object({
       median: z.number(),
     })
     .nullable(),
+  per_user: z.record(z.string(), per_user_day_schema).nullable(),
+  per_hour: user_history_schema.nullable(),
 });
+
+export const produtividade_conferencia_range_schema = z.object({
+  meta: z.number(),
+  avg: z
+    .object({
+      mean: z.number(),
+      median: z.number(),
+    })
+    .nullable(),
+  per_user: z.record(z.string(), per_user_range_schema).nullable(),
+  per_day: user_history_schema.nullable(),
+});
+
+export const produtividade_conferencia_schema =
+  produtividade_conferencia_day_schema.or(
+    produtividade_conferencia_range_schema,
+  );

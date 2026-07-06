@@ -12,10 +12,14 @@ import {
   YAxis,
 } from "recharts";
 import type z from "zod";
+import type { produtividade_conferencia_schema } from "@/lib/schemas";
 import { duration } from "@/lib/utils";
-import { horas_trabalhadas, type per_user_schema } from "./page";
 
-const EmbalagemPorHora = ({ user }: { user: z.infer<typeof per_user_schema>[string] }) => {
+const EmbalagemPorHora = ({
+  user,
+}: {
+  user: NonNullable<z.infer<typeof produtividade_conferencia_schema>["per_user"]>[string];
+}) => {
   const meta_percentage = ((user.embalagens_por_hora / user.meta) * 100) >> 0;
   return (
     <span className="w-full flex flex-row space-x-2 items-center justify-end">
@@ -25,7 +29,11 @@ const EmbalagemPorHora = ({ user }: { user: z.infer<typeof per_user_schema>[stri
       >
         {meta_percentage.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%
       </Chip>
-      <span>{user.embalagens_por_hora.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}</span>
+      <span>
+        {user.embalagens_por_hora.toLocaleString("pt-BR", {
+          maximumFractionDigits: 1,
+        })}
+      </span>
     </span>
   );
 };
@@ -36,7 +44,11 @@ const NAME_KEYS = {
   pedidos_conferidos: "N° de pedidos",
 } as const;
 
-export function UserComparison({ data }: { data: z.infer<typeof per_user_schema> }) {
+export function UserComparison({
+  data,
+}: {
+  data: NonNullable<z.infer<typeof produtividade_conferencia_schema>["per_user"]>;
+}) {
   const [graphKey, setGraphKey] = useState("total_embalagens");
   const userNames = useMemo(() => Object.keys(data), [data]);
   const [user1, setUser1] = useState(userNames[0]);
@@ -45,30 +57,64 @@ export function UserComparison({ data }: { data: z.infer<typeof per_user_schema>
   const userData1 = data[user1];
   const userData2 = data[user2];
 
-  const startDate = new Date(
-    Math.min(userData1.hora_inicio.getTime(), userData2.hora_inicio.getTime()),
-  );
-  const endDate = new Date(Math.max(userData1.hora_fim.getTime(), userData2.hora_fim.getTime()));
-  const hours = horas_trabalhadas.filter(
-    (hour) => hour >= startDate.getHours() && hour <= endDate.getHours(),
-  );
-  const hourlyComparisonData = hours.map((hour) => ({
-    [NAME_KEYS.caixas]: {
-      hour: `${hour}h`,
-      [user1]: userData1.por_hora[hour]?.caixas.size || 0,
-      [user2]: userData2.por_hora[hour]?.caixas.size || 0,
-    },
-    [NAME_KEYS.pedidos_conferidos]: {
-      hour: `${hour}h`,
-      [user1]: userData1.por_hora[hour]?.pedidos_conferidos.size || 0,
-      [user2]: userData2.por_hora[hour]?.pedidos_conferidos.size || 0,
-    },
-    [NAME_KEYS.total_embalagens]: {
-      hour: `${hour}h`,
-      [user1]: userData1.por_hora[hour]?.total_embalagens || 0,
-      [user2]: userData2.por_hora[hour]?.total_embalagens || 0,
-    },
-  }));
+  const date_entries = [
+    ...("por_hora" in userData1
+      ? Object.entries(userData1.por_hora)
+          .filter(([, values]) =>
+            Object.values(values).some((v) => (typeof v === "number" ? v : v.size) !== 0),
+          )
+          .map(([key]) => Number(key))
+      : Object.entries(userData1.por_dia)
+          .filter(([, values]) =>
+            Object.values(values).some((v) => (typeof v === "number" ? v : v.size) !== 0),
+          )
+          .map(([date]) => new Date(date).getDate())),
+    ...("por_hora" in userData2
+      ? Object.entries(userData2.por_hora)
+          .filter(([, values]) =>
+            Object.values(values).some((v) => (typeof v === "number" ? v : v.size) !== 0),
+          )
+          .map(([key]) => Number(key))
+      : Object.entries(userData2.por_dia)
+          .filter(([, values]) =>
+            Object.values(values).some((v) => (typeof v === "number" ? v : v.size) !== 0),
+          )
+          .map(([date]) => new Date(date).getDate())),
+  ];
+  const startDate = Math.min(...date_entries);
+  const endDate = Math.max(...date_entries);
+  const hourlyComparisonData = Array.from({ length: endDate - startDate })
+    .fill(null)
+    .map((_, i) => i + startDate)
+    .map((hour) => ({
+      [NAME_KEYS.caixas]: {
+        hour: `${hour}h`,
+        [user1]:
+          ("por_hora" in userData1 ? userData1.por_hora : userData1.por_dia)[hour]?.caixas.size ||
+          0,
+        [user2]:
+          ("por_hora" in userData2 ? userData2.por_hora : userData2.por_dia)[hour]?.caixas.size ||
+          0,
+      },
+      [NAME_KEYS.pedidos_conferidos]: {
+        hour: `${hour}h`,
+        [user1]:
+          ("por_hora" in userData1 ? userData1.por_hora : userData1.por_dia)[hour]
+            ?.pedidos_conferidos.size || 0,
+        [user2]:
+          ("por_hora" in userData2 ? userData2.por_hora : userData2.por_dia)[hour]
+            ?.pedidos_conferidos.size || 0,
+      },
+      [NAME_KEYS.total_embalagens]: {
+        hour: `${hour}h`,
+        [user1]:
+          ("por_hora" in userData1 ? userData1.por_hora : userData1.por_dia)[hour]
+            ?.total_embalagens || 0,
+        [user2]:
+          ("por_hora" in userData2 ? userData2.por_hora : userData2.por_dia)[hour]
+            ?.total_embalagens || 0,
+      },
+    }));
 
   // Normalize data for radar chart (0-100 scale)
   const maxEmbalagens = Math.max(userData1.total_embalagens, userData2.total_embalagens);
@@ -171,13 +217,17 @@ export function UserComparison({ data }: { data: z.infer<typeof per_user_schema>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Caixas/Hora:</span>
               <span className="font-medium">
-                {userData1.caixas_por_hora.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
+                {userData1.caixas_por_hora.toLocaleString("pt-BR", {
+                  maximumFractionDigits: 1,
+                })}
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Pedidos/Hora:</span>
               <span className="font-medium">
-                {userData1.pedidos_por_hora.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
+                {userData1.pedidos_por_hora.toLocaleString("pt-BR", {
+                  maximumFractionDigits: 1,
+                })}
               </span>
             </div>
             <div className="flex justify-between">
@@ -205,13 +255,17 @@ export function UserComparison({ data }: { data: z.infer<typeof per_user_schema>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Caixas/Hora:</span>
               <span className="font-medium">
-                {userData2.caixas_por_hora.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
+                {userData2.caixas_por_hora.toLocaleString("pt-BR", {
+                  maximumFractionDigits: 1,
+                })}
               </span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Pedidos/Hora:</span>
               <span className="font-medium">
-                {userData2.pedidos_por_hora.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}
+                {userData2.pedidos_por_hora.toLocaleString("pt-BR", {
+                  maximumFractionDigits: 1,
+                })}
               </span>
             </div>
             <div className="flex justify-between">
@@ -230,7 +284,12 @@ export function UserComparison({ data }: { data: z.infer<typeof per_user_schema>
           <Card.Content>
             <div className="h-80">
               <AreaChart
-                style={{ width: "100%", maxWidth: "2000px", maxHeight: "30vh", aspectRatio: 2 }}
+                style={{
+                  width: "100%",
+                  maxWidth: "2000px",
+                  maxHeight: "30vh",
+                  aspectRatio: 2,
+                }}
                 responsive
                 data={hourlyComparisonData.map(
                   (data) => data[NAME_KEYS[graphKey as keyof typeof NAME_KEYS]],
