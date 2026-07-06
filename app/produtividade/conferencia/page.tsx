@@ -6,24 +6,32 @@ import {
   Calendar,
   DateField,
   DatePicker,
+  DateRange,
+  DateRangePicker,
   Description,
   Label,
   NumberField,
-  ProgressBar,
+  RangeCalendar,
   Spinner,
   Tabs,
   Tooltip,
 } from "@heroui/react";
-import { type DateValue, fromDate, getLocalTimeZone, now, today } from "@internationalized/date";
+import {
+  type DateValue,
+  fromAbsolute,
+  getLocalTimeZone,
+  now,
+  today,
+} from "@internationalized/date";
 import { useNow } from "@shined/react-use";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ChevronsLeftIcon,
   ChevronsRightIcon,
-  Grid2x2XIcon,
+  MoveRightIcon,
   RefreshCwIcon,
 } from "lucide-react";
 import {
@@ -36,15 +44,10 @@ import {
 } from "react";
 import { z } from "zod";
 import { Auth } from "@/components/auth";
-import { produtividade_conferencia_schema } from "@/lib/schemas";
 import { relative_locale } from "@/lib/utils";
-import { get_relatorio_conferencia } from "./get_data";
-import skus_pre from "./skus.json";
-import { UserComparison } from "./user-comparison";
-import { UserDashboard } from "./user-dashboard";
-import { UsersTable } from "./users-table";
+import PerDay from "./per_day";
 
-const skus = z.record(z.string(), z.number().positive().catch(1)).parse(skus_pre);
+export const QUERY_KEY = "relatorio_conferencia";
 
 export const per_user_schema = z.record(
   z.string(),
@@ -77,7 +80,9 @@ export const per_user_schema = z.record(
   }),
 );
 
-export const horas_trabalhadas = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21];
+export const horas_trabalhadas = [
+  7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21,
+];
 export const marcadores: Array<{
   label: string;
   momento: { hh: number; mm: number };
@@ -89,10 +94,6 @@ export const marcadores: Array<{
   { label: "Saída jantar", momento: { hh: 17, mm: 30 } },
   { label: "Volta do jantar", momento: { hh: 18, mm: 30 } },
 ];
-
-const data_processing_schema = produtividade_conferencia_schema
-  .omit({ avg: true, meta: true })
-  .or(z.object({ per_user: z.null(), per_hour: z.null() }));
 
 export const NAME_KEYS = {
   total_embalagens: "Média de embalagens por hora",
@@ -109,48 +110,28 @@ export const SelectedSectionContext = createContext<
 
 function Page() {
   const timezone = useMemo(() => getLocalTimeZone(), []);
-  const [date, setDate] = useState<DateValue>(
-    process.env.NODE_ENV !== "development"
-      ? today(timezone)
-      : today(timezone).subtract({ days: 1 }),
-  );
+  const [date, setDate] = useState<
+    { type: "day"; value: DateValue } | { type: "range"; value: DateRange }
+  >({
+    type: "day",
+    value:
+      process.env.NODE_ENV !== "development"
+        ? today(timezone)
+        : today(timezone).subtract({ days: 1 }),
+  });
   const [meta, setMeta] = useState(800);
 
   const curr_now = useNow({ interval: 1000 });
   const now_ = now(timezone);
 
   const queryClient = useQueryClient();
-  const hours_filter = useMemo(
-    () =>
-      horas_trabalhadas.map(
-        (h) =>
-          [
-            h,
-            new Date(date.toDate(timezone).getTime() + h * 1000 * 60 * 60),
-            new Date(date.toDate(timezone).getTime() + (h + 1) * 1000 * 60 * 60),
-          ] as const,
-      ),
-    [date, timezone],
-  );
-  const { data, isFetching, dataUpdatedAt, isPending } = useQuery({
-    queryKey: ["relatorio_conferencia", date] as const,
-    queryFn: () => get_relatorio_conferencia(date.toDate(timezone)),
-    refetchInterval: 1000 * 60 * 60,
-    refetchOnReconnect: true,
-    refetchOnWindowFocus: true,
-    staleTime: (query) =>
-      now_.set({ hour: 0, minute: 0, second: 0, millisecond: 0 }).compare(query.queryKey[1]) < 0
-        ? "static"
-        : 1000 * 60 * 15,
-    placeholderData: (previousData, _) => previousData,
-    throwOnError(error, query) {
-      console.log({ error, query });
-      return false;
-    },
-    networkMode: "offlineFirst",
-    // enabled: false,
-  });
   const [isUpdated, setIsUpdated] = useState(false);
+
+  const [dataUpdatedAt, setUpdatedAt] = useState(0);
+  const [average, setAverage] = useState({
+    mean: NaN,
+    median: NaN,
+  });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: precisamos atualizar o estado do botão de refresh toda vez que atualizamos os dados, por isso usamos o dataUpdatedAt
   useEffect(() => {
@@ -158,166 +139,17 @@ function Page() {
     setTimeout(() => setIsUpdated(false), 5000);
   }, [dataUpdatedAt]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: usar o dataUpdatedAt é necessario, porque o data pode não atualizar no momento do refetch, se o resultado anterior for o mesmo
-  const { per_user, per_hour }: z.infer<typeof data_processing_schema> = useMemo(() => {
-    if (data == null) return { per_hour: null, per_user: null };
-
-    return {
-      per_user: Object.fromEntries(
-        Array.from(new Set(data.map((e) => e.usuario)))
-          .map((user) => data.filter((cx) => cx.usuario === user))
-          .map((data) => {
-            const produtos = Object.entries(
-              data.reduce(
-                (obj, prod) => {
-                  if (prod.produto in obj) obj[prod.produto] += prod.quantidade;
-                  else obj[prod.produto] = prod.quantidade;
-                  return obj;
-                },
-                {} as Record<string, number>,
-              ),
-            ).map(([sku, quantidade_pre]) => ({
-              sku,
-              quantidade_pre,
-              multiplo: skus[sku as keyof typeof skus],
-            }));
-
-            const total_embalagens = produtos
-              .map(({ quantidade_pre, multiplo }) => quantidade_pre / (multiplo ?? 1))
-              .reduce((a, b) => a + b, 0);
-
-            const pedidos_conferidos = new Set(data.map((cx) => cx.codigoPedido));
-
-            const hora_inicio = Math.min(...data.map((cx) => cx.montagem.getTime()));
-            const hora_fim = Math.max(...data.map((cx) => cx.montagem.getTime()));
-
-            const horas_conferidas = Math.abs(hora_fim - hora_inicio) / 3_600_000;
-
-            const por_hora = hours_filter
-              .filter(([, start]) => start <= now_.toDate())
-              .map(
-                ([hour, start, end]) =>
-                  [
-                    hour,
-                    data.filter(
-                      (cx) =>
-                        fromDate(cx.montagem, timezone).compare(fromDate(start, timezone)) > 0 &&
-                        fromDate(cx.montagem, timezone).compare(fromDate(end, timezone)) < 0,
-                    ),
-                  ] as const,
-              )
-              .map(
-                ([hour, data]) =>
-                  [
-                    hour,
-                    {
-                      total_embalagens: Object.entries(
-                        data.reduce(
-                          (obj, prod) => {
-                            if (prod.produto in obj) obj[prod.produto] += prod.quantidade;
-                            else obj[prod.produto] = prod.quantidade;
-                            return obj;
-                          },
-                          {} as Record<string, number>,
-                        ),
-                      )
-                        .map(
-                          ([produto, quantidade]) =>
-                            quantidade / (skus[produto as keyof typeof skus] ?? 1),
-                        )
-                        .reduce((a, b) => a + b, 0),
-                      pedidos_conferidos: new Set(data.map((cx) => cx.codigoPedido)),
-                      caixas: new Set(data.map((cx) => cx.caixa)),
-                    },
-                  ] as const,
-              );
-
-            const pedidos_por_hora = pedidos_conferidos.size / horas_conferidas;
-
-            const caixas = new Set(data.map((cx) => cx.caixa));
-
-            const caixas_por_hora = caixas.size / horas_conferidas;
-
-            return [
-              data[0].usuario,
-              {
-                total_embalagens,
-                pedidos_conferidos,
-                caixas,
-                por_hora: Object.fromEntries(por_hora),
-                pedidos_por_hora,
-                caixas_por_hora,
-                embalagens_por_hora: total_embalagens / horas_conferidas,
-                hora_inicio: new Date(hora_inicio),
-                hora_fim: new Date(hora_fim),
-                duração: Math.floor(Math.abs(hora_inicio - hora_fim) / 60_000),
-                produtos,
-                meta,
-              },
-            ];
-          }),
-      ),
-      per_hour: Object.fromEntries(
-        hours_filter
-          .filter(([, start]) => start <= now_.toDate())
-          .map(
-            ([hour, start, end]) =>
-              [hour, data.filter((cx) => cx.montagem >= start && cx.montagem < end)] as const,
-          )
-          .map(
-            ([hour, data]) =>
-              ([
-                hour,
-                {
-                  total_embalagens: Math.round(
-                    Object.entries(
-                      data.reduce(
-                        (obj, prod) => {
-                          if (prod.produto in obj) obj[prod.produto] += prod.quantidade;
-                          else obj[prod.produto] = prod.quantidade;
-                          return obj;
-                        },
-                        {} as Record<string, number>,
-                      ),
-                    )
-                      .map(
-                        ([produto, quantidade]) =>
-                          quantidade / (skus[produto as keyof typeof skus] ?? 1),
-                      )
-                      .reduce((a, b) => a + b, 0) /
-                      Math.max(1, new Set(data.map((cx) => cx.usuario)).size),
-                  ),
-                  pedidos_conferidos: new Set(data.map((cx) => cx.codigoPedido)),
-                  caixas: new Set(data.map((cx) => cx.caixa)),
-                },
-              ] as const),
-          ),
-      ),
-    };
-  }, [data, hours_filter, meta, timezone]);
-
-  console.log({ per_user, per_hour });
-
-  const todays_average = useMemo(() => {
-    const values = Object.values(per_user ?? {})
-      .filter((v) => Number.isFinite(v.embalagens_por_hora))
-      .map((x) => x.embalagens_por_hora);
-
-    const sorted = values.sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-
-    return {
-      mean: values.reduce((a, b) => a + b, 0) / values.length,
-      median: sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2,
-    };
-  }, [per_user]);
-
   const selectedUserState = useState<string | null>(null);
   const selectedSectionState = useState<string>("overview");
 
-  const last_updated_seconds_raw = Math.floor((curr_now.getTime() - dataUpdatedAt) / 1000);
+  const last_updated_seconds_raw = Math.floor(
+    (curr_now.getTime() - dataUpdatedAt) / 1000,
+  );
   const last_updated_seconds = last_updated_seconds_raw % 60;
-  const last_updated_minutes = (last_updated_seconds_raw - last_updated_seconds) / 60;
+  const last_updated_minutes =
+    (last_updated_seconds_raw - last_updated_seconds) / 60;
+
+  const isFetching = queryClient.isFetching({ queryKey: [QUERY_KEY] }) > 0;
 
   return (
     <SelectedSectionContext value={selectedSectionState}>
@@ -329,10 +161,21 @@ function Page() {
                 <Button
                   isPending={isFetching}
                   onPress={() =>
-                    queryClient.invalidateQueries({ queryKey: ["relatorio_conferencia"] })
+                    queryClient.invalidateQueries({
+                      queryKey: [QUERY_KEY],
+                    })
                   }
                   className={`w-48 ${isUpdated ? "bg-lime-600 text-white" : ""}`}
-                  isDisabled={isUpdated}
+                  isDisabled={
+                    isUpdated ||
+                    now_
+                      .set({ hour: 0, minute: 0, second: 0, millisecond: 0 })
+                      .compare(
+                        date.type === "day"
+                          ? date.value
+                          : fromAbsolute(dataUpdatedAt, timezone),
+                      ) > 0
+                  }
                 >
                   {({ isPending, isDisabled }) => (
                     <>
@@ -351,16 +194,33 @@ function Page() {
                     </>
                   )}
                 </Button>
-                {!isPending && !isFetching && (
+                {dataUpdatedAt !== 0 && !isFetching && (
                   <Description className="text-center">
-                    Atualizado{" "}
-                    {last_updated_minutes > 0 &&
-                      relative_locale.format(-last_updated_minutes, "minute")}
-                    {last_updated_minutes > 0 && last_updated_seconds > 0 && " e "}
-                    {last_updated_seconds > 0 &&
-                      relative_locale
-                        .format(-last_updated_seconds, "second")
-                        .replace(last_updated_minutes > 0 ? "há " : "", "")}
+                    {now_
+                      .set({ hour: 0, minute: 0, second: 0, millisecond: 0 })
+                      .compare(
+                        date.type === "day"
+                          ? date.value
+                          : fromAbsolute(dataUpdatedAt, timezone),
+                      ) > 0 ? (
+                      "Essas informações são estáticas e não suportam atualizações."
+                    ) : (
+                      <>
+                        Atualizado{" "}
+                        {last_updated_minutes > 0 &&
+                          relative_locale.format(
+                            -last_updated_minutes,
+                            "minute",
+                          )}
+                        {last_updated_minutes > 0 &&
+                          last_updated_seconds > 0 &&
+                          " e "}
+                        {last_updated_seconds > 0 &&
+                          relative_locale
+                            .format(-last_updated_seconds, "second")
+                            .replace(last_updated_minutes > 0 ? "há " : "", "")}
+                      </>
+                    )}
                   </Description>
                 )}
               </div>
@@ -368,7 +228,68 @@ function Page() {
                 <h1 className="text-3xl font-bold tracking-tight text-foreground">
                   Painel de Produtividade
                 </h1>
-                <Tabs variant="secondary" className="w-lg">
+                <Tabs
+                  variant="secondary"
+                  className="w-lg"
+                  selectedKey={date.type}
+                  onSelectionChange={(key) =>
+                    setDate((curr_date) => {
+                      if (key === curr_date.type) return curr_date;
+
+                      if (key === "range" && curr_date.type === "day") {
+                        const date = curr_date.value;
+                        const day = date.toDate(timezone).getDay();
+
+                        const end = date
+                          .add({
+                            days: 5 - day,
+                          })
+                          .set({
+                            hour: 0,
+                            minute: 0,
+                            second: 0,
+                            millisecond: 0,
+                          });
+
+                        const max = now_.subtract({ days: 1 });
+
+                        return {
+                          type: "range",
+                          value: {
+                            start: date
+                              .subtract({
+                                days: day - 1,
+                              })
+                              .set({
+                                hour: 0,
+                                minute: 0,
+                                second: 0,
+                                millisecond: 0,
+                              }),
+                            end: (end.compare(max) <= 0 ? end : max).set({
+                              hour: 0,
+                              minute: 0,
+                              second: 0,
+                              millisecond: 0,
+                            }),
+                          },
+                        };
+                      }
+
+                      if (key === "day" && curr_date.type === "range")
+                        return {
+                          type: "day",
+                          value:
+                            process.env.NODE_ENV !== "development"
+                              ? today(timezone)
+                              : today(timezone).subtract({ days: 1 }),
+                        };
+
+                      console.error({ key, curr_date });
+                      return curr_date;
+                    })
+                  }
+                >
                   <Tabs.ListContainer>
                     <Tabs.List aria-label="Options">
                       <Tabs.Tab id="day">
@@ -382,80 +303,277 @@ function Page() {
                     </Tabs.List>
                   </Tabs.ListContainer>
                   <Tabs.Panel className="pt-4" id="day">
-                    <div className="flex flex-row space-x-4 justify-center">
-                      <Tooltip delay={0}>
-                        <Button
-                          isIconOnly
-                          className="place-self-start"
-                          variant="secondary"
-                          onPress={() => setDate((curr_date) => curr_date.subtract({ weeks: 1 }))}
-                        >
-                          <ChevronsLeftIcon />
-                        </Button>
-                        <Tooltip.Content>
-                          <p className="break-normal">Voltar 1 semana</p>
-                        </Tooltip.Content>
-                      </Tooltip>
-                      <Tooltip delay={0}>
-                        <Button
-                          isIconOnly
-                          className="place-self-start"
-                          variant="secondary"
-                          onPress={() => setDate((curr_date) => curr_date.subtract({ days: 1 }))}
-                        >
-                          <ChevronLeftIcon />
-                        </Button>
-                        <Tooltip.Content>
-                          <p className="break-normal">Voltar 1 dia</p>
-                        </Tooltip.Content>
-                      </Tooltip>
-                      <div className="flex flex-col">
+                    {date.type === "day" && (
+                      <div className="flex flex-row space-x-4 justify-center">
+                        <Tooltip delay={0}>
+                          <Button
+                            isIconOnly
+                            className="place-self-start"
+                            variant="secondary"
+                            onPress={() =>
+                              setDate((curr_date) =>
+                                curr_date.type === "day"
+                                  ? {
+                                      type: "day",
+                                      value: curr_date.value.subtract({
+                                        weeks: 1,
+                                      }),
+                                    }
+                                  : curr_date,
+                              )
+                            }
+                          >
+                            <ChevronsLeftIcon />
+                          </Button>
+                          <Tooltip.Content>
+                            <p className="break-normal">Voltar 1 semana</p>
+                          </Tooltip.Content>
+                        </Tooltip>
+                        <Tooltip delay={0}>
+                          <Button
+                            isIconOnly
+                            className="place-self-start"
+                            variant="secondary"
+                            onPress={() =>
+                              setDate((curr_date) =>
+                                curr_date.type === "day"
+                                  ? {
+                                      type: "day",
+                                      value: curr_date.value.subtract({
+                                        days: 1,
+                                      }),
+                                    }
+                                  : curr_date,
+                              )
+                            }
+                          >
+                            <ChevronLeftIcon />
+                          </Button>
+                          <Tooltip.Content>
+                            <p className="break-normal">Voltar 1 dia</p>
+                          </Tooltip.Content>
+                        </Tooltip>
+                        <div className="flex flex-col">
+                          <DatePicker
+                            name="date"
+                            aria-label="produtividade do dia"
+                            value={date.value}
+                            granularity="day"
+                            onChange={(date) =>
+                              date != null &&
+                              setDate({ type: "day", value: date })
+                            }
+                            className="w-72"
+                          >
+                            <DateField.Group fullWidth>
+                              <DateField.Input>
+                                {(segment) => (
+                                  <DateField.Segment segment={segment} />
+                                )}
+                              </DateField.Input>
+                              <DateField.Suffix>
+                                <DatePicker.Trigger>
+                                  <DatePicker.TriggerIndicator />
+                                </DatePicker.Trigger>
+                              </DateField.Suffix>
+                            </DateField.Group>
+                            <DatePicker.Popover>
+                              <Calendar
+                                aria-label="Event date"
+                                maxValue={today(timezone)}
+                              >
+                                <Calendar.Header>
+                                  <Calendar.YearPickerTrigger>
+                                    <Calendar.YearPickerTriggerHeading />
+                                    <Calendar.YearPickerTriggerIndicator />
+                                  </Calendar.YearPickerTrigger>
+                                  <Calendar.NavButton slot="previous" />
+                                  <Calendar.NavButton slot="next" />
+                                </Calendar.Header>
+                                <Calendar.Grid>
+                                  <Calendar.GridHeader>
+                                    {(day) => (
+                                      <Calendar.HeaderCell>
+                                        {day}
+                                      </Calendar.HeaderCell>
+                                    )}
+                                  </Calendar.GridHeader>
+                                  <Calendar.GridBody>
+                                    {(date) => <Calendar.Cell date={date} />}
+                                  </Calendar.GridBody>
+                                </Calendar.Grid>
+                                <Calendar.YearPickerGrid>
+                                  <Calendar.YearPickerGridBody>
+                                    {({ year }) => (
+                                      <Calendar.YearPickerCell year={year} />
+                                    )}
+                                  </Calendar.YearPickerGridBody>
+                                </Calendar.YearPickerGrid>
+                              </Calendar>
+                            </DatePicker.Popover>
+                            <Description className="text-center">
+                              {date.value
+                                .toDate(timezone)
+                                .toLocaleString("pt-BR", {
+                                  year: "numeric",
+                                  month: "long",
+                                  weekday: "long",
+                                  day: "numeric",
+                                })
+                                .split(" ")
+                                .map((text, i) => (
+                                  <span
+                                    className={
+                                      [0, 3].includes(i) ? "capitalize" : ""
+                                    }
+                                    key={`${text}-${date.toString()}-${
+                                      // biome-ignore lint/suspicious/noArrayIndexKey: o index é a unica informação adicional que temos para impedir duas keys iguais
+                                      i
+                                    }`}
+                                  >
+                                    {" "}
+                                    {text}
+                                  </span>
+                                ))}{" "}
+                              (
+                              <span className="capitalize">
+                                {relative_locale.format(
+                                  -Math.floor(
+                                    (curr_now.getTime() -
+                                      date.value.toDate(timezone).getTime()) /
+                                      86_400_000,
+                                  ),
+                                  "day",
+                                )}
+                              </span>
+                              )
+                            </Description>
+                          </DatePicker>
+                        </div>
 
-                      <DatePicker
-                        name="date"
-                        aria-label="produtividade do dia"
-                        value={date}
-                        granularity="day"
-                        onChange={(date) => date != null && setDate(date)}
-                        className="w-72"
-                      >
-                        <DateField.Group fullWidth>
-                          <DateField.Input>
-                            {(segment) => <DateField.Segment segment={segment} />}
-                          </DateField.Input>
-                          <DateField.Suffix>
-                            <DatePicker.Trigger>
-                              <DatePicker.TriggerIndicator />
-                            </DatePicker.Trigger>
-                          </DateField.Suffix>
-                        </DateField.Group>
-                        <DatePicker.Popover>
-                          <Calendar aria-label="Event date" maxValue={today(timezone)}>
-                            <Calendar.Header>
-                              <Calendar.YearPickerTrigger>
-                                <Calendar.YearPickerTriggerHeading />
-                                <Calendar.YearPickerTriggerIndicator />
-                              </Calendar.YearPickerTrigger>
-                              <Calendar.NavButton slot="previous" />
-                              <Calendar.NavButton slot="next" />
-                            </Calendar.Header>
-                            <Calendar.Grid>
-                              <Calendar.GridHeader>
-                                {(day) => <Calendar.HeaderCell>{day}</Calendar.HeaderCell>}
-                              </Calendar.GridHeader>
-                              <Calendar.GridBody>
-                                {(date) => <Calendar.Cell date={date} />}
-                              </Calendar.GridBody>
-                            </Calendar.Grid>
-                            <Calendar.YearPickerGrid>
-                              <Calendar.YearPickerGridBody>
-                                {({ year }) => <Calendar.YearPickerCell year={year} />}
-                              </Calendar.YearPickerGridBody>
-                            </Calendar.YearPickerGrid>
-                          </Calendar>
-                        </DatePicker.Popover>
-                        <Description className="text-center">
-                          {date
+                        <Tooltip delay={0}>
+                          <Button
+                            isIconOnly
+                            className="place-self-start"
+                            variant="secondary"
+                            isDisabled={
+                              now_.compare(date.value.add({ days: 1 })) < 0
+                            }
+                            onPress={() =>
+                              setDate((curr_date) => {
+                                if (curr_date.type !== "day") return curr_date;
+                                const value = curr_date.value.add({ days: 1 });
+
+                                if (now_.compare(value) >= 0)
+                                  return { type: "day", value };
+                                return curr_date;
+                              })
+                            }
+                          >
+                            <ChevronRightIcon />
+                          </Button>
+                          <Tooltip.Content>
+                            <p className="break-normal">Avançar 1 dia</p>
+                          </Tooltip.Content>
+                        </Tooltip>
+
+                        <Tooltip delay={0}>
+                          <Button
+                            isIconOnly
+                            className="place-self-start"
+                            isDisabled={
+                              now_.compare(date.value.add({ weeks: 1 })) < 0
+                            }
+                            variant="secondary"
+                            onPress={() =>
+                              setDate((curr_date) => {
+                                if (curr_date.type !== "day") return curr_date;
+                                const value = curr_date.value.add({ weeks: 1 });
+
+                                if (now_.compare(value) >= 0)
+                                  return { type: "day", value };
+                                return curr_date;
+                              })
+                            }
+                          >
+                            <ChevronsRightIcon />
+                          </Button>
+                          <Tooltip.Content>
+                            <p className="break-normal">Avançar 1 semana</p>
+                          </Tooltip.Content>
+                        </Tooltip>
+                      </div>
+                    )}
+                  </Tabs.Panel>
+                  <Tabs.Panel className="pt-4" id="range">
+                    {date.type === "range" && (
+                      <div className="flex flex-col space-x-4 items-center gap-1">
+                        <DateRangePicker
+                          endName="endDate"
+                          startName="startDate"
+                          granularity="day"
+                          value={date.value}
+                          onChange={(value) =>
+                            value != null && setDate({ type: "range", value })
+                          }
+                          className="w-full"
+                          aria-label="Periodo"
+                        >
+                          <DateField.Group fullWidth>
+                            <DateField.Input slot="start">
+                              {(segment) => (
+                                <DateField.Segment segment={segment} />
+                              )}
+                            </DateField.Input>
+                            <DateRangePicker.RangeSeparator />
+                            <DateField.Input slot="end">
+                              {(segment) => (
+                                <DateField.Segment segment={segment} />
+                              )}
+                            </DateField.Input>
+                            <DateField.Suffix>
+                              <DateRangePicker.Trigger>
+                                <DateRangePicker.TriggerIndicator />
+                              </DateRangePicker.Trigger>
+                            </DateField.Suffix>
+                          </DateField.Group>
+                          <DateRangePicker.Popover>
+                            <RangeCalendar
+                              aria-label="Trip dates"
+                              maxValue={today(timezone).subtract({ days: 1 })}
+                            >
+                              <RangeCalendar.Header>
+                                <RangeCalendar.YearPickerTrigger>
+                                  <RangeCalendar.YearPickerTriggerHeading />
+                                  <RangeCalendar.YearPickerTriggerIndicator />
+                                </RangeCalendar.YearPickerTrigger>
+                                <RangeCalendar.NavButton slot="previous" />
+                                <RangeCalendar.NavButton slot="next" />
+                              </RangeCalendar.Header>
+                              <RangeCalendar.Grid>
+                                <RangeCalendar.GridHeader>
+                                  {(day) => (
+                                    <RangeCalendar.HeaderCell>
+                                      {day}
+                                    </RangeCalendar.HeaderCell>
+                                  )}
+                                </RangeCalendar.GridHeader>
+                                <RangeCalendar.GridBody>
+                                  {(date) => <RangeCalendar.Cell date={date} />}
+                                </RangeCalendar.GridBody>
+                              </RangeCalendar.Grid>
+                              <RangeCalendar.YearPickerGrid>
+                                <RangeCalendar.YearPickerGridBody>
+                                  {({ year }) => (
+                                    <RangeCalendar.YearPickerCell year={year} />
+                                  )}
+                                </RangeCalendar.YearPickerGridBody>
+                              </RangeCalendar.YearPickerGrid>
+                            </RangeCalendar>
+                          </DateRangePicker.Popover>
+                        </DateRangePicker>
+                        <Description className="text-center inline-flex flex-row gap-1">
+                          {date.value.start
                             .toDate(timezone)
                             .toLocaleString("pt-BR", {
                               year: "numeric",
@@ -466,77 +584,45 @@ function Page() {
                             .split(" ")
                             .map((text, i) => (
                               <span
+                                className={
+                                  [0, 3].includes(i) ? "capitalize" : ""
+                                }
                                 key={`${text}-${date.toString()}-${
                                   // biome-ignore lint/suspicious/noArrayIndexKey: o index é a unica informação adicional que temos para impedir duas keys iguais
                                   i
                                 }`}
-                                className={[0, 3].includes(i) ? "capitalize" : ""}
                               >
                                 {" "}
                                 {text}
                               </span>
-                            ))}{" "}
-                          (
-                          <span className="capitalize">
-                            {relative_locale.format(
-                              -Math.floor(
-                                (curr_now.getTime() - date.toDate(timezone).getTime()) / 86_400_000,
-                              ),
-                              "day",
-                            )}
-                          </span>
-                          )
+                            ))}
+                          <MoveRightIcon className="size-4 mx-1.5" />
+                          {date.value.end
+                            .toDate(timezone)
+                            .toLocaleString("pt-BR", {
+                              year: "numeric",
+                              month: "long",
+                              weekday: "long",
+                              day: "numeric",
+                            })
+                            .split(" ")
+                            .map((text, i) => (
+                              <span
+                                className={
+                                  [0, 3].includes(i) ? "capitalize" : ""
+                                }
+                                key={`${text}-${date.toString()}-${
+                                  // biome-ignore lint/suspicious/noArrayIndexKey: o index é a unica informação adicional que temos para impedir duas keys iguais
+                                  i
+                                }`}
+                              >
+                                {" "}
+                                {text}
+                              </span>
+                            ))}
                         </Description>
-                      </DatePicker>
                       </div>
-
-                      <Tooltip delay={0}>
-                        <Button
-                          isIconOnly
-                          className="place-self-start"
-                          variant="secondary"
-                          isDisabled={now_.compare(date.add({ days: 1 })) < 0}
-                          onPress={() =>
-                            setDate((curr_date) => {
-                              const new_date = curr_date.add({ days: 1 });
-
-                              if (now_.compare(new_date) >= 0) return new_date;
-                              return curr_date;
-                            })
-                          }
-                        >
-                          <ChevronRightIcon />
-                        </Button>
-                        <Tooltip.Content>
-                          <p className="break-normal">Avançar 1 dia</p>
-                        </Tooltip.Content>
-                      </Tooltip>
-
-                      <Tooltip delay={0}>
-                        <Button
-                          isIconOnly
-                          className="place-self-start"
-                          isDisabled={now_.compare(date.add({ weeks: 1 })) < 0}
-                          variant="secondary"
-                          onPress={() =>
-                            setDate((curr_date) => {
-                              const new_date = curr_date.add({ weeks: 1 });
-
-                              if (now_.compare(new_date) >= 0) return new_date;
-                              return curr_date;
-                            })
-                          }
-                        >
-                          <ChevronsRightIcon />
-                        </Button>
-                        <Tooltip.Content>
-                          <p className="break-normal">Avançar 1 semana</p>
-                        </Tooltip.Content>
-                      </Tooltip>
-                    </div>
-                  </Tabs.Panel>
-                  <Tabs.Panel className="pt-4" id="range">
-                    <p>Em desenvolvimento</p>
+                    )}
                   </Tabs.Panel>
                 </Tabs>
               </div>
@@ -560,76 +646,38 @@ function Page() {
                 </NumberField>
                 <div className="flex flex-col gap-2">
                   <p className="text-sm text-muted">Definir para:</p>
-                  <ButtonGroup variant="primary" isDisabled={isFetching} size="sm">
-                    <Button onPress={() => setMeta(todays_average.mean)}>
+                  <ButtonGroup
+                    variant="primary"
+                    isDisabled={isFetching}
+                    size="sm"
+                  >
+                    <Button onPress={() => setMeta(average.mean)}>
                       Média
                       {isFetching
                         ? ""
-                        : ` (${todays_average.mean.toLocaleString("pt-BR", { maximumFractionDigits: 0 })})`}
+                        : ` (${average.mean.toLocaleString("pt-BR", { maximumFractionDigits: 0 })})`}
                     </Button>
-                    <Button onPress={() => setMeta(todays_average.median)}>
+                    <Button onPress={() => setMeta(average.median)}>
                       <ButtonGroup.Separator />
                       Mediana
                       {isFetching
                         ? ""
-                        : ` (${todays_average.median.toLocaleString("pt-BR", { maximumFractionDigits: 0 })})`}
+                        : ` (${average.median.toLocaleString("pt-BR", { maximumFractionDigits: 0 })})`}
                     </Button>
                   </ButtonGroup>
                 </div>
               </div>
             </header>
 
-            {isPending ? (
-              <div className="flex flex-col items-center pt-32">
-                <ProgressBar size="lg" isIndeterminate aria-label="Loading" className="w-64">
-                  <Label className="mb-3.5 mt-5">Carregando dados</Label>
-                  <ProgressBar.Track>
-                    <ProgressBar.Fill />
-                  </ProgressBar.Track>
-                </ProgressBar>
-              </div>
-            ) : Object.keys(per_user ?? {}).length === 0 ? (
-              <div className="flex flex-col items-center pt-32">
-                <Grid2x2XIcon />
-                <Label className="mb-3.5 mt-5">Nenhum dado encontrado</Label>
-                <Description className="mb-8">Selecione outra data no seletor acima</Description>
-              </div>
-            ) : (
-              <Tabs
-                className="min-w-full"
-                onSelectionChange={(key) => selectedSectionState[1](key as string)}
-                selectedKey={selectedSectionState[0] ?? "overview"}
-              >
-                <Tabs.ListContainer>
-                  <Tabs.List aria-label="Options">
-                    <Tabs.Tab id="overview">
-                      Tabela Geral
-                      <Tabs.Indicator />
-                    </Tabs.Tab>
-                    <Tabs.Tab id="analytics">
-                      Metricas do usuário
-                      <Tabs.Indicator />
-                    </Tabs.Tab>
-                    <Tabs.Tab id="reports">
-                      Comparação
-                      <Tabs.Indicator />
-                    </Tabs.Tab>
-                  </Tabs.List>
-                </Tabs.ListContainer>
-                <Tabs.Panel className="pt-4" id="overview">
-                  <UsersTable
-                    data={{ per_user, per_hour, meta, avg: todays_average }}
-                    isFetching={isFetching}
-                  />
-                </Tabs.Panel>
-                <Tabs.Panel className="pt-4" id="analytics">
-                  <UserDashboard data={per_user ?? {}} />
-                </Tabs.Panel>
-                <Tabs.Panel className="pt-4" id="reports">
-                  <UserComparison data={per_user ?? {}} />
-                </Tabs.Panel>
-              </Tabs>
-            )}
+            {date.type === "day" ? (
+              <PerDay
+                date={date.value}
+                meta={meta}
+                timezone={timezone}
+                setUpdatedAt={setUpdatedAt}
+                setAverage={setAverage}
+              />
+            ) : null}
           </div>
         </main>
       </SelectedUserContext>
