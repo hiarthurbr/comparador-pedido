@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, Chip, ListBox, Select, Tabs } from "@heroui/react";
+import { fromDate, getLocalTimeZone } from "@internationalized/date";
 import { useMemo, useState } from "react";
 import {
   Area,
@@ -12,7 +13,11 @@ import {
   YAxis,
 } from "recharts";
 import type z from "zod";
-import type { produtividade_conferencia_schema } from "@/lib/schemas";
+import type {
+  per_user_day_schema,
+  per_user_range_schema,
+  produtividade_conferencia_schema,
+} from "@/lib/schemas";
 import { duration } from "@/lib/utils";
 
 const EmbalagemPorHora = ({
@@ -37,6 +42,8 @@ const EmbalagemPorHora = ({
     </span>
   );
 };
+
+const ONE_DAY_IN_MS = 86_400_000;
 
 const NAME_KEYS = {
   total_embalagens: "N° de embalagens",
@@ -68,7 +75,7 @@ export function UserComparison({
           .filter(([, values]) =>
             Object.values(values).some((v) => (typeof v === "number" ? v : v.size) !== 0),
           )
-          .map(([date]) => new Date(date).getDate())),
+          .map(([date]) => new Date(date).getTime())),
     ...("por_hora" in userData2
       ? Object.entries(userData2.por_hora)
           .filter(([, values]) =>
@@ -79,42 +86,81 @@ export function UserComparison({
           .filter(([, values]) =>
             Object.values(values).some((v) => (typeof v === "number" ? v : v.size) !== 0),
           )
-          .map(([date]) => new Date(date).getDate())),
+          .map(([date]) => new Date(date).getTime())),
   ];
+  const entry_type = "por_hora" in userData1 ? "hour" : "date";
   const startDate = Math.min(...date_entries);
   const endDate = Math.max(...date_entries);
-  const hourlyComparisonData = Array.from({ length: endDate - startDate })
+  const timezone = getLocalTimeZone();
+
+  const hourlyComparisonData = Array.from({
+    length:
+      entry_type === "date"
+        ? fromDate(new Date(endDate), timezone).compare(fromDate(new Date(startDate), timezone)) /
+            ONE_DAY_IN_MS +
+          1
+        : endDate - startDate,
+  })
     .fill(null)
-    .map((_, i) => i + startDate)
-    .map((hour) => ({
-      [NAME_KEYS.caixas]: {
-        hour: `${hour}h`,
-        [user1]:
-          ("por_hora" in userData1 ? userData1.por_hora : userData1.por_dia)[hour]?.caixas.size ||
-          0,
-        [user2]:
-          ("por_hora" in userData2 ? userData2.por_hora : userData2.por_dia)[hour]?.caixas.size ||
-          0,
-      },
-      [NAME_KEYS.pedidos_conferidos]: {
-        hour: `${hour}h`,
-        [user1]:
-          ("por_hora" in userData1 ? userData1.por_hora : userData1.por_dia)[hour]
-            ?.pedidos_conferidos.size || 0,
-        [user2]:
-          ("por_hora" in userData2 ? userData2.por_hora : userData2.por_dia)[hour]
-            ?.pedidos_conferidos.size || 0,
-      },
-      [NAME_KEYS.total_embalagens]: {
-        hour: `${hour}h`,
-        [user1]:
-          ("por_hora" in userData1 ? userData1.por_hora : userData1.por_dia)[hour]
-            ?.total_embalagens || 0,
-        [user2]:
-          ("por_hora" in userData2 ? userData2.por_hora : userData2.por_dia)[hour]
-            ?.total_embalagens || 0,
-      },
-    }));
+    .map((_, i) =>
+      entry_type === "hour"
+        ? i + startDate
+        : fromDate(new Date(startDate), timezone).add({ days: i }),
+    )
+    .map((hour) => {
+      if (typeof hour === "number") {
+        const userData1_ = userData1 as z.infer<typeof per_user_day_schema>;
+        const userData2_ = userData2 as z.infer<typeof per_user_day_schema>;
+
+        return {
+          [NAME_KEYS.caixas]: {
+            hour: `${hour}h`,
+            [user1]: userData1_.por_hora[hour]?.caixas.size || 0,
+            [user2]: userData2_.por_hora[hour]?.caixas.size || 0,
+          },
+          [NAME_KEYS.pedidos_conferidos]: {
+            hour: `${hour}h`,
+            [user1]: userData1_.por_hora[hour]?.pedidos_conferidos.size || 0,
+            [user2]: userData2_.por_hora[hour]?.pedidos_conferidos.size || 0,
+          },
+          [NAME_KEYS.total_embalagens]: {
+            hour: `${hour}h`,
+            [user1]: userData1_.por_hora[hour]?.total_embalagens || 0,
+            [user2]: userData2_.por_hora[hour]?.total_embalagens || 0,
+          },
+        };
+      } else {
+        const userData1_ = userData1 as z.infer<typeof per_user_range_schema>;
+        const userData2_ = userData2 as z.infer<typeof per_user_range_schema>;
+
+        const date = hour.toDate();
+        const iso_string = date.toISOString();
+        const date_string = date.toLocaleDateString("pt-BR", {
+          year: "numeric",
+          month: "long",
+          weekday: "long",
+          day: "numeric",
+        });
+
+        return {
+          [NAME_KEYS.caixas]: {
+            hour: date_string,
+            [user1]: userData1_.por_dia[iso_string]?.caixas.size || 0,
+            [user2]: userData2_.por_dia[iso_string]?.caixas.size || 0,
+          },
+          [NAME_KEYS.pedidos_conferidos]: {
+            hour: date_string,
+            [user1]: userData1_.por_dia[iso_string]?.pedidos_conferidos.size || 0,
+            [user2]: userData2_.por_dia[iso_string]?.pedidos_conferidos.size || 0,
+          },
+          [NAME_KEYS.total_embalagens]: {
+            hour: date_string,
+            [user1]: userData1_.por_dia[iso_string]?.total_embalagens || 0,
+            [user2]: userData2_.por_dia[iso_string]?.total_embalagens || 0,
+          },
+        };
+      }
+    });
 
   // Normalize data for radar chart (0-100 scale)
   const maxEmbalagens = Math.max(userData1.total_embalagens, userData2.total_embalagens);
@@ -151,6 +197,7 @@ export function UserComparison({
         <div className="flex items-center gap-2">
           <Select
             className="w-[256px]"
+            aria-label="user1"
             placeholder="Select a state"
             value={user1}
             onChange={(value) => setUser1(value as string)}
@@ -174,6 +221,7 @@ export function UserComparison({
         </div>
         <div className="flex items-center gap-2">
           <Select
+            aria-label="user2"
             className="w-[256px]"
             placeholder="Select a state"
             value={user2}

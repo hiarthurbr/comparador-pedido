@@ -166,13 +166,9 @@ export default function PerRange({
 
                 const horas_conferidas = Math.abs(hora_fim - hora_inicio) / 3_600_000;
 
-                console.log({ hora_inicio, hora_fim, horas_conferidas})
-
                 return horas_conferidas
               })
               .reduce((a, b) => a + b, 0);
-
-            console.log({ cx_p_dia, horas_conferidas });
 
             const por_dia = cx_p_dia.map(
               ([hour, data]) =>

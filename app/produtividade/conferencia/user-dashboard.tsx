@@ -209,7 +209,7 @@ export function UserDashboard({
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="hour" />
+                  <XAxis dataKey="hora" />
                   <YAxis width="auto" />
                   <ChartTooltip />
                   <YAxis width="auto" yAxisId="left" />
@@ -270,7 +270,7 @@ export function UserDashboard({
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="hour" />
+                  <XAxis dataKey="hora" />
                   <YAxis width="auto" />
                   <ChartTooltip />
                   {

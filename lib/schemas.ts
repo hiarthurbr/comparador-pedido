@@ -336,7 +336,7 @@ const user_history_schema = z.record(
   }),
 );
 
-const per_user_day_schema = z.object({
+export const per_user_day_schema = z.object({
   total_embalagens: z.number(),
   pedidos_conferidos: z.set(z.string()),
   caixas: z.set(z.string()),
@@ -357,7 +357,7 @@ const per_user_day_schema = z.object({
   por_hora: user_history_schema,
 });
 
-const per_user_range_schema = z.object({
+export const per_user_range_schema = z.object({
   total_embalagens: z.number(),
   pedidos_conferidos: z.set(z.string()),
   caixas: z.set(z.string()),
