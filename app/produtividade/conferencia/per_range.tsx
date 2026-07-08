@@ -36,13 +36,11 @@ export const NAME_KEYS = {
 
 export default function PerRange({
   date_range,
-  meta,
   timezone,
   setUpdatedAt,
   setAverage,
 }: {
   date_range: DateRange;
-  meta: number;
   timezone: string;
   setUpdatedAt: Dispatch<SetStateAction<number>>;
   setAverage: Dispatch<SetStateAction<{ mean: number; median: number }>>;
@@ -216,7 +214,6 @@ export default function PerRange({
                 hora_fim: null,
                 duração: Math.floor(horas_conferidas * 60),
                 produtos,
-                meta,
               },
             ];
           }),
@@ -301,7 +298,7 @@ export default function PerRange({
     setData({ ...result, average });
 
     setAverage(average);
-  }, [data, meta, timezone, dates.map, isPending, setAverage]);
+  }, [data, timezone, dates.map, isPending, setAverage]);
 
   const selectedSectionState = useContext(SelectedSectionContext);
 
@@ -350,7 +347,7 @@ export default function PerRange({
         </Tabs.List>
       </Tabs.ListContainer>
       <Tabs.Panel className="pt-4" id="overview">
-        <UsersTable data={{ per_user, per_day, meta, avg: average }} isFetching={isPending} />
+        <UsersTable data={{ per_user, per_day, average }} isFetching={isPending} />
       </Tabs.Panel>
       <Tabs.Panel className="pt-4" id="analytics">
         <UserDashboard data={per_user ?? {}} />

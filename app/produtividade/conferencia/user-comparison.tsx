@@ -2,7 +2,7 @@
 
 import { Card, Chip, ListBox, Select, Tabs } from "@heroui/react";
 import { fromDate, getLocalTimeZone } from "@internationalized/date";
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -19,13 +19,15 @@ import type {
   produtividade_conferencia_schema,
 } from "@/lib/schemas";
 import { duration } from "@/lib/utils";
+import { PersistantStateContext } from "./page";
 
 const EmbalagemPorHora = ({
   user,
 }: {
   user: NonNullable<z.infer<typeof produtividade_conferencia_schema>["per_user"]>[string];
 }) => {
-  const meta_percentage = ((user.embalagens_por_hora / user.meta) * 100) >> 0;
+  const { meta } = useContext(PersistantStateContext)
+  const meta_percentage = ((user.embalagens_por_hora / meta) * 100) >> 0;
   return (
     <span className="w-full flex flex-row space-x-2 items-center justify-end">
       <Chip

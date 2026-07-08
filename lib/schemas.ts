@@ -353,7 +353,6 @@ export const per_user_day_schema = z.object({
   hora_inicio: z.date(),
   hora_fim: z.date(),
   duração: z.number(),
-  meta: z.number(),
   por_hora: user_history_schema,
 });
 
@@ -374,13 +373,11 @@ export const per_user_range_schema = z.object({
   hora_inicio: z.date().nullable(),
   hora_fim: z.date().nullable(),
   duração: z.number(),
-  meta: z.number(),
   por_dia: user_history_schema,
 });
 
 export const produtividade_conferencia_day_schema = z.object({
-  meta: z.number(),
-  avg: z
+  average: z
     .object({
       mean: z.number(),
       median: z.number(),
@@ -391,8 +388,7 @@ export const produtividade_conferencia_day_schema = z.object({
 });
 
 export const produtividade_conferencia_range_schema = z.object({
-  meta: z.number(),
-  avg: z
+  average: z
     .object({
       mean: z.number(),
       median: z.number(),

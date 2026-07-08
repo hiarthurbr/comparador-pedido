@@ -42,6 +42,8 @@ import {
   useMemo,
   useState,
 } from "react";
+import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { Auth } from "@/components/auth";
 import { relative_locale } from "@/lib/utils";
 import PerDay from "./per_day";
@@ -68,12 +70,41 @@ export const NAME_KEYS = {
   pedidos_conferidos: "N° de pedidos conferidos",
 } as const;
 
+type PersistState = {
+  user_filter: Record<string, "remove" | "neutral" | "include">;
+  set_user_filter: (user: string, filter: PersistState["user_filter"][string]) => void;
+  meta: number;
+  set_meta: (meta: number) => void;
+};
+
+const usePersistantState = create<PersistState>()(
+  persist(
+    (set, get) => ({
+      user_filter: {},
+      set_user_filter: (user: string, filter: PersistState["user_filter"][string]) =>
+        set({ user_filter: { ...get().user_filter, [user]: filter } }),
+      meta: 800,
+      set_meta: (meta: number) => set({ meta }),
+    }),
+    {
+      name: "produtividade/conferencia/persist", // unique name
+      storage: createJSONStorage(() => localStorage),
+    },
+  ),
+);
+
 export const SelectedUserContext = createContext<
   [string | null, Dispatch<SetStateAction<string | null>>] | null
 >(null);
 export const SelectedSectionContext = createContext<
   [string, Dispatch<SetStateAction<string>>] | null
 >(null);
+export const PersistantStateContext = createContext<PersistState>({
+  meta: 800,
+  user_filter: {},
+  set_meta(_) {},
+  set_user_filter(_, __) {},
+});
 
 function Page() {
   const timezone = useMemo(() => getLocalTimeZone(), []);
@@ -86,7 +117,8 @@ function Page() {
         ? today(timezone)
         : today(timezone).subtract({ days: new Date().getDay() === 1 ? 3 : 1 }),
   });
-  const [meta, setMeta] = useState(800);
+
+  const persistantState = usePersistantState();
 
   const curr_now = useNow({ interval: 1000 });
   const now_ = now(timezone);
@@ -373,104 +405,158 @@ function Page() {
         </Tabs.Panel>
         <Tabs.Panel className="pt-4" id="range">
           {date.type === "range" && (
-            <div className="flex flex-col space-x-4 items-center gap-1">
-              <DateRangePicker
-                endName="endDate"
-                startName="startDate"
-                granularity="day"
-                value={date.value}
-                onChange={(value) => value != null && setDate({ type: "range", value })}
-                className="w-full"
-                aria-label="Periodo"
-              >
-                <DateField.Group fullWidth>
-                  <DateField.Input slot="start">
-                    {(segment) => <DateField.Segment segment={segment} />}
-                  </DateField.Input>
-                  <DateRangePicker.RangeSeparator />
-                  <DateField.Input slot="end">
-                    {(segment) => <DateField.Segment segment={segment} />}
-                  </DateField.Input>
-                  <DateField.Suffix>
-                    <DateRangePicker.Trigger>
-                      <DateRangePicker.TriggerIndicator />
-                    </DateRangePicker.Trigger>
-                  </DateField.Suffix>
-                </DateField.Group>
-                <DateRangePicker.Popover>
-                  <RangeCalendar
-                    aria-label="Trip dates"
-                    maxValue={today(timezone).subtract({ days: 1 })}
-                  >
-                    <RangeCalendar.Header>
-                      <RangeCalendar.YearPickerTrigger>
-                        <RangeCalendar.YearPickerTriggerHeading />
-                        <RangeCalendar.YearPickerTriggerIndicator />
-                      </RangeCalendar.YearPickerTrigger>
-                      <RangeCalendar.NavButton slot="previous" />
-                      <RangeCalendar.NavButton slot="next" />
-                    </RangeCalendar.Header>
-                    <RangeCalendar.Grid>
-                      <RangeCalendar.GridHeader>
-                        {(day) => <RangeCalendar.HeaderCell>{day}</RangeCalendar.HeaderCell>}
-                      </RangeCalendar.GridHeader>
-                      <RangeCalendar.GridBody>
-                        {(date) => <RangeCalendar.Cell date={date} />}
-                      </RangeCalendar.GridBody>
-                    </RangeCalendar.Grid>
-                    <RangeCalendar.YearPickerGrid>
-                      <RangeCalendar.YearPickerGridBody>
-                        {({ year }) => <RangeCalendar.YearPickerCell year={year} />}
-                      </RangeCalendar.YearPickerGridBody>
-                    </RangeCalendar.YearPickerGrid>
-                  </RangeCalendar>
-                </DateRangePicker.Popover>
-              </DateRangePicker>
-              <Description className="text-center inline-flex flex-row gap-1">
-                {date.value.start
-                  .toDate(timezone)
-                  .toLocaleString("pt-BR", {
-                    year: "numeric",
-                    month: "long",
-                    weekday: "long",
-                    day: "numeric",
-                  })
-                  .split(" ")
-                  .map((text, i) => (
-                    <span
-                      className={[0, 3].includes(i) ? "capitalize" : ""}
-                      key={`${text}-${date.toString()}-${
-                        // biome-ignore lint/suspicious/noArrayIndexKey: o index é a unica informação adicional que temos para impedir duas keys iguais
-                        i
-                      }`}
+            <div className="flex flex-row space-x-4 items-center gap-1">
+              <Tooltip delay={0}>
+                <Button
+                  isIconOnly
+                  className="place-self-start w-11.5"
+                  variant="secondary"
+                  onPress={() =>
+                    setDate((curr_date) =>
+                      curr_date.type === "range"
+                        ? {
+                            type: "range",
+                            value: {
+                              start: curr_date.value.start.subtract({
+                                weeks: 1,
+                              }),
+                              end: curr_date.value.end.subtract({
+                                weeks: 1,
+                              }),
+                            },
+                          }
+                        : curr_date,
+                    )
+                  }
+                >
+                  <ChevronsLeftIcon />
+                </Button>
+                <Tooltip.Content>
+                  <p className="break-normal">Voltar 1 semana</p>
+                </Tooltip.Content>
+              </Tooltip>
+
+              <div className="flex flex-col w-full">
+                <DateRangePicker
+                  endName="endDate"
+                  startName="startDate"
+                  granularity="day"
+                  value={date.value}
+                  onChange={(value) => value != null && setDate({ type: "range", value })}
+                  className="w-full"
+                  aria-label="Periodo"
+                >
+                  <DateField.Group fullWidth>
+                    <DateField.Input slot="start">
+                      {(segment) => <DateField.Segment segment={segment} />}
+                    </DateField.Input>
+                    <DateRangePicker.RangeSeparator />
+                    <DateField.Input slot="end">
+                      {(segment) => <DateField.Segment segment={segment} />}
+                    </DateField.Input>
+                    <DateField.Suffix>
+                      <DateRangePicker.Trigger>
+                        <DateRangePicker.TriggerIndicator />
+                      </DateRangePicker.Trigger>
+                    </DateField.Suffix>
+                  </DateField.Group>
+                  <DateRangePicker.Popover>
+                    <RangeCalendar
+                      aria-label="Trip dates"
+                      maxValue={today(timezone).subtract({ days: 1 })}
                     >
-                      {" "}
-                      {text}
-                    </span>
-                  ))}
-                <MoveRightIcon className="size-4 mx-1.5" />
-                {date.value.end
-                  .toDate(timezone)
-                  .toLocaleString("pt-BR", {
-                    year: "numeric",
-                    month: "long",
-                    weekday: "long",
-                    day: "numeric",
-                  })
-                  .split(" ")
-                  .map((text, i) => (
-                    <span
-                      className={[0, 3].includes(i) ? "capitalize" : ""}
-                      key={`${text}-${date.toString()}-${
-                        // biome-ignore lint/suspicious/noArrayIndexKey: o index é a unica informação adicional que temos para impedir duas keys iguais
-                        i
-                      }`}
-                    >
-                      {" "}
-                      {text}
-                    </span>
-                  ))}
-              </Description>
+                      <RangeCalendar.Header>
+                        <RangeCalendar.YearPickerTrigger>
+                          <RangeCalendar.YearPickerTriggerHeading />
+                          <RangeCalendar.YearPickerTriggerIndicator />
+                        </RangeCalendar.YearPickerTrigger>
+                        <RangeCalendar.NavButton slot="previous" />
+                        <RangeCalendar.NavButton slot="next" />
+                      </RangeCalendar.Header>
+                      <RangeCalendar.Grid>
+                        <RangeCalendar.GridHeader>
+                          {(day) => <RangeCalendar.HeaderCell>{day}</RangeCalendar.HeaderCell>}
+                        </RangeCalendar.GridHeader>
+                        <RangeCalendar.GridBody>
+                          {(date) => <RangeCalendar.Cell date={date} />}
+                        </RangeCalendar.GridBody>
+                      </RangeCalendar.Grid>
+                      <RangeCalendar.YearPickerGrid>
+                        <RangeCalendar.YearPickerGridBody>
+                          {({ year }) => <RangeCalendar.YearPickerCell year={year} />}
+                        </RangeCalendar.YearPickerGridBody>
+                      </RangeCalendar.YearPickerGrid>
+                    </RangeCalendar>
+                  </DateRangePicker.Popover>
+                </DateRangePicker>
+                <Description className="text-center inline-flex flex-row gap-1">
+                  {date.value.start
+                    .toDate(timezone)
+                    .toLocaleString("pt-BR", {
+                      month: "long",
+                      weekday: "long",
+                      day: "numeric",
+                    })
+                    .split(" ")
+                    .map((text, i) => (
+                      <span
+                        className={[0, 3].includes(i) ? "capitalize" : ""}
+                        key={`${text}-${date.toString()}-${
+                          // biome-ignore lint/suspicious/noArrayIndexKey: o index é a unica informação adicional que temos para impedir duas keys iguais
+                          i
+                        }`}
+                      >
+                        {" "}
+                        {text}
+                      </span>
+                    ))}
+                  <MoveRightIcon className="size-4 mx-1.5" />
+                  {date.value.end
+                    .toDate(timezone)
+                    .toLocaleString("pt-BR", {
+                      month: "long",
+                      weekday: "long",
+                      day: "numeric",
+                    })
+                    .split(" ")
+                    .map((text, i) => (
+                      <span
+                        className={[0, 3].includes(i) ? "capitalize" : ""}
+                        key={`${text}-${date.toString()}-${
+                          // biome-ignore lint/suspicious/noArrayIndexKey: o index é a unica informação adicional que temos para impedir duas keys iguais
+                          i
+                        }`}
+                      >
+                        {" "}
+                        {text}
+                      </span>
+                    ))}
+                </Description>
+              </div>
+
+              <Tooltip delay={0}>
+                <Button
+                  isIconOnly
+                  className="place-self-start w-11.5"
+                  isDisabled={now_.compare(date.value.end.add({ weeks: 1 })) < 0}
+                  variant="secondary"
+                  onPress={() =>
+                    setDate((curr_date) => {
+                      if (curr_date.type === "day") return curr_date;
+                      const start = curr_date.value.start.add({ weeks: 1 });
+                      const end = curr_date.value.end.add({ weeks: 1 });
+
+                      if (now_.compare(end) >= 0) return { type: "range", value: { start, end } };
+                      return curr_date;
+                    })
+                  }
+                >
+                  <ChevronsRightIcon />
+                </Button>
+                <Tooltip.Content>
+                  <p className="break-normal">Avançar 1 semana</p>
+                </Tooltip.Content>
+              </Tooltip>
             </div>
           )}
         </Tabs.Panel>
@@ -480,136 +566,136 @@ function Page() {
   );
 
   return (
-    <SelectedSectionContext value={selectedSectionState}>
-      <SelectedUserContext value={selectedUserState}>
-        <main className="min-h-screen bg-background p-6 flex flex-col items-center">
-          <div className="space-y-6">
-            <header className="space-x-8 container grid grid-flow-col grid-cols-6 content-start">
-              <div className="flex flex-col justify-self-end place-self-start my-12 space-y-2 w-53 items-center">
-                <Button
-                  isPending={isFetching}
-                  onPress={() =>
-                    queryClient.invalidateQueries({
-                      queryKey: [QUERY_KEY],
-                    })
-                  }
-                  className={`w-48 ${isUpdated ? "bg-lime-600 text-white" : ""}`}
-                  isDisabled={
-                    isUpdated ||
-                    now_
-                      .set({ hour: 0, minute: 0, second: 0, millisecond: 0 })
-                      .compare(
-                        date.type === "day" ? date.value : fromAbsolute(dataUpdatedAt, timezone),
-                      ) > 0
-                  }
-                >
-                  {({ isPending, isDisabled }) => (
-                    <>
-                      {isPending ? (
-                        <Spinner color="current" size="sm" />
-                      ) : isDisabled ? (
-                        <CheckIcon />
-                      ) : (
-                        <RefreshCwIcon />
-                      )}
-                      {isPending
-                        ? "Atualizando dados..."
-                        : isDisabled
-                          ? "Dados atualizados!"
-                          : "Atualizar dados"}
-                    </>
-                  )}
-                </Button>
-                {dataUpdatedAt !== 0 && !isFetching && (
-                  <Description className="text-center">
-                    {now_
-                      .set({ hour: 0, minute: 0, second: 0, millisecond: 0 })
-                      .compare(
-                        date.type === "day" ? date.value : fromAbsolute(dataUpdatedAt, timezone),
-                      ) > 0 ? (
-                      "Essas informações são estáticas e não suportam atualizações."
-                    ) : (
+    <PersistantStateContext value={persistantState}>
+      <SelectedSectionContext value={selectedSectionState}>
+        <SelectedUserContext value={selectedUserState}>
+          <main className="min-h-screen bg-background p-6 flex flex-col items-center">
+            <div className="space-y-6">
+              <header className="space-x-8 container grid grid-flow-col grid-cols-6 content-start">
+                <div className="flex flex-col justify-self-end place-self-start my-12 space-y-2 w-53 items-center">
+                  <Button
+                    isPending={isFetching}
+                    onPress={() =>
+                      queryClient.invalidateQueries({
+                        queryKey: [QUERY_KEY],
+                      })
+                    }
+                    className={`w-48 ${isUpdated ? "bg-lime-600 text-white" : ""}`}
+                    isDisabled={
+                      isUpdated ||
+                      now_
+                        .set({ hour: 0, minute: 0, second: 0, millisecond: 0 })
+                        .compare(
+                          date.type === "day" ? date.value : fromAbsolute(dataUpdatedAt, timezone),
+                        ) > 0
+                    }
+                  >
+                    {({ isPending, isDisabled }) => (
                       <>
-                        Atualizado{" "}
-                        {last_updated_minutes > 0 &&
-                          relative_locale.format(-last_updated_minutes, "minute")}
-                        {last_updated_minutes > 0 && last_updated_seconds > 0 && " e "}
-                        {last_updated_seconds > 0 &&
-                          relative_locale
-                            .format(-last_updated_seconds, "second")
-                            .replace(last_updated_minutes > 0 ? "há " : "", "")}
+                        {isPending ? (
+                          <Spinner color="current" size="sm" />
+                        ) : isDisabled ? (
+                          <CheckIcon />
+                        ) : (
+                          <RefreshCwIcon />
+                        )}
+                        {isPending
+                          ? "Atualizando dados..."
+                          : isDisabled
+                            ? "Dados atualizados!"
+                            : "Atualizar dados"}
                       </>
                     )}
-                  </Description>
-                )}
-              </div>
-              <div className="flex flex-col items-center mx-auto col-start-2 col-span-4 space-y-4">
-                <h1 className="text-3xl font-bold tracking-tight text-foreground">
-                  Painel de Produtividade
-                </h1>
-                {tabs}
-              </div>
-              <div className="col-start-6 flex items-center flex-col space-y-2">
-                <NumberField
-                  className="w-full max-w-64"
-                  defaultValue={800}
-                  minValue={0}
-                  value={meta}
-                  onChange={setMeta}
-                  step={50}
-                  name="meta"
-                  isDisabled={isFetching}
-                >
-                  <Label>Meta por Hora</Label>
-                  <NumberField.Group>
-                    <NumberField.DecrementButton />
-                    <NumberField.Input className="w-30" />
-                    <NumberField.IncrementButton />
-                  </NumberField.Group>
-                </NumberField>
-                <div className="flex flex-col gap-2">
-                  <p className="text-sm text-muted">Definir para:</p>
-                  <ButtonGroup variant="primary" isDisabled={isFetching} size="sm">
-                    <Button onPress={() => setMeta(average.mean)}>
-                      Média
-                      {isFetching
-                        ? ""
-                        : ` (${average.mean.toLocaleString("pt-BR", { maximumFractionDigits: 0 })})`}
-                    </Button>
-                    <Button onPress={() => setMeta(average.median)}>
-                      <ButtonGroup.Separator />
-                      Mediana
-                      {isFetching
-                        ? ""
-                        : ` (${average.median.toLocaleString("pt-BR", { maximumFractionDigits: 0 })})`}
-                    </Button>
-                  </ButtonGroup>
+                  </Button>
+                  {dataUpdatedAt !== 0 && !isFetching && (
+                    <Description className="text-center">
+                      {now_
+                        .set({ hour: 0, minute: 0, second: 0, millisecond: 0 })
+                        .compare(
+                          date.type === "day" ? date.value : fromAbsolute(dataUpdatedAt, timezone),
+                        ) > 0 ? (
+                        "Essas informações são estáticas e não suportam atualizações."
+                      ) : (
+                        <>
+                          Atualizado{" "}
+                          {last_updated_minutes > 0 &&
+                            relative_locale.format(-last_updated_minutes, "minute")}
+                          {last_updated_minutes > 0 && last_updated_seconds > 0 && " e "}
+                          {last_updated_seconds > 0 &&
+                            relative_locale
+                              .format(-last_updated_seconds, "second")
+                              .replace(last_updated_minutes > 0 ? "há " : "", "")}
+                        </>
+                      )}
+                    </Description>
+                  )}
                 </div>
-              </div>
-            </header>
+                <div className="flex flex-col items-center mx-auto col-start-2 col-span-4 space-y-4">
+                  <h1 className="text-3xl font-bold tracking-tight text-foreground">
+                    Painel de Produtividade
+                  </h1>
+                  {tabs}
+                </div>
+                <div className="col-start-6 flex items-center flex-col space-y-2">
+                  <NumberField
+                    className="w-full max-w-64"
+                    defaultValue={800}
+                    minValue={0}
+                    value={persistantState.meta}
+                    onChange={persistantState.set_meta}
+                    step={50}
+                    name="meta"
+                    isDisabled={isFetching}
+                  >
+                    <Label>Meta por Hora</Label>
+                    <NumberField.Group>
+                      <NumberField.DecrementButton />
+                      <NumberField.Input className="w-30" />
+                      <NumberField.IncrementButton />
+                    </NumberField.Group>
+                  </NumberField>
+                  <div className="flex flex-col gap-2">
+                    <p className="text-sm text-muted">Definir para:</p>
+                    <ButtonGroup variant="primary" isDisabled={isFetching} size="sm">
+                      <Button onPress={() => persistantState.set_meta(average.mean)}>
+                        Média
+                        {isFetching
+                          ? ""
+                          : ` (${average.mean.toLocaleString("pt-BR", { maximumFractionDigits: 0 })})`}
+                      </Button>
+                      <Button onPress={() => persistantState.set_meta(average.median)}>
+                        <ButtonGroup.Separator />
+                        Mediana
+                        {isFetching
+                          ? ""
+                          : ` (${average.median.toLocaleString("pt-BR", { maximumFractionDigits: 0 })})`}
+                      </Button>
+                    </ButtonGroup>
+                  </div>
+                </div>
+              </header>
 
-            {date.type === "day" ? (
-              <PerDay
-                date={date.value}
-                meta={meta}
-                timezone={timezone}
-                setUpdatedAt={setUpdatedAt}
-                setAverage={setAverage}
-              />
-            ) : null}
-            {date.type === "range" ? (
-              <PerRange
-                date_range={date.value}
-                meta={meta}
-                timezone={timezone}
-                setUpdatedAt={setUpdatedAt}
-                setAverage={setAverage}
-              />
-            ) : null}
-          </div>
-        </main>
-      </SelectedUserContext>
-    </SelectedSectionContext>
+              {date.type === "day" ? (
+                <PerDay
+                  date={date.value}
+                  timezone={timezone}
+                  setUpdatedAt={setUpdatedAt}
+                  setAverage={setAverage}
+                />
+              ) : null}
+              {date.type === "range" ? (
+                <PerRange
+                  date_range={date.value}
+                  timezone={timezone}
+                  setUpdatedAt={setUpdatedAt}
+                  setAverage={setAverage}
+                />
+              ) : null}
+            </div>
+          </main>
+        </SelectedUserContext>
+      </SelectedSectionContext>
+    </PersistantStateContext>
   );
 }
 

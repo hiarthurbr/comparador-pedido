@@ -28,7 +28,12 @@ import { Area, AreaChart, CartesianGrid, Tooltip as ChartTooltip, XAxis, YAxis }
 import type z from "zod";
 import type { produtividade_conferencia_schema } from "@/lib/schemas";
 import { duration, SortableColumnHeader, toSortDescriptor, toSortingState } from "@/lib/utils";
-import { NAME_KEYS, SelectedSectionContext, SelectedUserContext } from "./page";
+import {
+  NAME_KEYS,
+  PersistantStateContext,
+  SelectedSectionContext,
+  SelectedUserContext,
+} from "./page";
 
 type ProductsTableData = NonNullable<
   z.infer<typeof produtividade_conferencia_schema>["per_user"]
@@ -289,7 +294,7 @@ const columns = [
         <Skeleton className="h-3 w-full rounded-lg" />
       ),
   }),
-  columnHelper.accessor(({ embalagens_por_hora, meta }) => ({ embalagens_por_hora, meta }), {
+  columnHelper.accessor(({ embalagens_por_hora }) => ({ embalagens_por_hora }), {
     header: "Embalagens/Hora",
     id: "emb_p_hora",
     sortDescFirst: true,
@@ -304,8 +309,8 @@ const columns = [
           ? -1
           : 0,
     cell: (info) => {
-      const meta_percentage =
-        ((info.getValue().embalagens_por_hora / info.getValue().meta) * 100) >> 0;
+      const { meta } = useContext(PersistantStateContext);
+      const meta_percentage = ((info.getValue().embalagens_por_hora / meta) * 100) >> 0;
       return Number.isFinite(info.getValue().embalagens_por_hora) ? (
         <span className="w-full flex flex-row justify-between items-center">
           <span>
@@ -372,7 +377,7 @@ const columns = [
 
 const PAGE_SIZE = 14;
 export function UsersTable({
-  data: { avg, ...data },
+  data: { average, ...data },
   isFetching,
 }: {
   data: z.infer<typeof produtividade_conferencia_schema>;
@@ -475,9 +480,9 @@ export function UsersTable({
       .map((x) => x.embalagens_por_hora)
       .filter((x) => Number.isFinite(x));
     const mad =
-      avg == null
+      average == null
         ? NaN
-        : arr.reduce((sum, val) => sum + Math.abs(val - avg.median), 0) / arr.length;
+        : arr.reduce((sum, val) => sum + Math.abs(val - average.median), 0) / arr.length;
 
     type keys =
       | "name"
@@ -493,9 +498,9 @@ export function UsersTable({
       emb_p_hora: (
         <Description className="flex flex-row space-x-1 items-center">
           <span>Media de emb/hora:</span>
-          {avg != null && (
+          {average != null && (
             <>
-              <span>{avg.mean.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</span>
+              <span>{average.mean.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</span>
               <DiffIcon className="size-2.5" />
               <span>{mad.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}</span>
             </>
@@ -533,7 +538,7 @@ export function UsersTable({
     } satisfies { [key in keys]?: React.ReactNode };
   }, [
     data.per_user,
-    avg,
+    average,
     end,
     start,
     table.getCanNextPage,

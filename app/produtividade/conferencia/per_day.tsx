@@ -44,13 +44,11 @@ export const NAME_KEYS = {
 
 export default function PerDay({
   date,
-  meta,
   timezone,
   setUpdatedAt,
   setAverage,
 }: {
   date: DateValue;
-  meta: number;
   timezone: string;
   setUpdatedAt: Dispatch<SetStateAction<number>>;
   setAverage: Dispatch<SetStateAction<{ mean: number; median: number }>>;
@@ -93,12 +91,7 @@ export default function PerDay({
   }, [setUpdatedAt, dataUpdatedAt]);
 
   const [{ per_user, per_hour, average }, setData] = useState<
-    Omit<z.infer<typeof produtividade_conferencia_day_schema>, "meta" | "avg"> & {
-      average: {
-        mean: number;
-        median: number;
-      } | null;
-    }
+    z.infer<typeof produtividade_conferencia_day_schema>
   >({ per_hour: null, per_user: null, average: null });
 
   useEffect(() => {
@@ -195,7 +188,6 @@ export default function PerDay({
                 hora_fim: new Date(hora_fim),
                 duração: Math.floor(Math.abs(hora_inicio - hora_fim) / 60_000),
                 produtos,
-                meta,
               },
             ];
           }),
@@ -254,7 +246,7 @@ export default function PerDay({
     setData({ ...result, average });
 
     setAverage(average);
-  }, [data, hours_filter, meta, timezone, setAverage]);
+  }, [data, hours_filter, timezone, setAverage]);
 
   const selectedSectionState = useContext(SelectedSectionContext);
 
@@ -297,7 +289,7 @@ export default function PerDay({
         </Tabs.List>
       </Tabs.ListContainer>
       <Tabs.Panel className="pt-4" id="overview">
-        <UsersTable data={{ per_user, per_hour, meta, avg: average }} isFetching={isFetching} />
+        <UsersTable data={{ per_user, per_hour, average }} isFetching={isFetching} />
       </Tabs.Panel>
       <Tabs.Panel className="pt-4" id="analytics">
         <UserDashboard data={per_user ?? {}} />

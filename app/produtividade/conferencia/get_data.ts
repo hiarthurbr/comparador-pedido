@@ -67,6 +67,12 @@ const request_queue = queue(
   },
 );
 
+export async function get_all_users() {
+  return Array.from(
+    new Set((await db.caixas.toArray()).map((cx) => cx.usuario)),
+  );
+}
+
 export async function get_relatorio_conferencia(date: Date) {
   const today = new Date();
   const is_today =
