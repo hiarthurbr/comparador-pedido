@@ -44,8 +44,8 @@ const StoredNFsData = z.object({
 
 const Result = z.object({
   corr: z.array(nota_fiscal_schema),
-  err: z.array(nota_fiscal_schema),
-  ni: z.array(z.strictObject({ id: z.number() }).or(nota_fiscal_schema)),
+  err: z.array(z.strictObject({ id: z.number() }).or(nota_fiscal_schema)),
+  ni: z.array(nota_fiscal_schema),
 });
 
 async function parseXlsx(buffer: ArrayBuffer) {
@@ -150,11 +150,12 @@ function compareWithStoredData(
   );
 
   const Correct = xlsxData.nfs.filter((nf) => NFStoreJeferson_nf.includes(nf));
-  const NotIncluded = xlsxData.nfs.filter((nf) => !Correct.includes(nf));
-  const NotCorrect = xlsxData.nfs
+  const NotIncluded = xlsxData.nfs
+    .filter((nf) => !Correct.includes(nf))
     .map((nf) => NFStore.find((nfe) => nfe.NumeroNotaFiscal === nf))
     .filter((nf) => nf != null)
-    .filter((nf) => nf.Transportador !== "Jeferson");
+    .filter((nf) => nf.Transportador === "Jeferson");
+  const NotCorrect = xlsxData.nfs.filter((nf) => !Correct.includes(nf));
 
   console.log({
     NFStore,
@@ -169,11 +170,11 @@ function compareWithStoredData(
     corr: Correct.map((nf) => storedData.nfs.find((nfe) => nfe.NumeroNotaFiscal === nf))
       .filter((nf) => nf != null)
       .map((nf) => ({ id: nf.NumeroNotaFiscal, ...nf })),
-    err: NotCorrect.map((nf) => ({ id: nf.NumeroNotaFiscal, ...nf })),
-    ni: NotIncluded.map((nf) => ({
+    err: NotCorrect.map((nf) => ({
       store: storedData.nfs.find((nfe) => nfe.NumeroNotaFiscal === nf),
       nf,
     })).map((nf) => (nf.store ? { id: nf.store.NumeroNotaFiscal, ...nf.store } : { id: nf.nf })),
+    ni: NotIncluded.map((nf) => ({ id: nf.NumeroNotaFiscal, ...nf })),
   };
 }
 
