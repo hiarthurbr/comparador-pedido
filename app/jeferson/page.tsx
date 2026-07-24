@@ -77,13 +77,13 @@ async function parseXlsx(buffer: ArrayBuffer) {
         console.log({ year: v.getFullYear(), month: v.getMonth(), day: v.getDate() });
         return swap_day_month
           ? new Date(
-              `${v.getFullYear()}-${(v.getDate() + 1).toFixed(0).padStart(2, "0")}-${(v.getMonth() + 1).toFixed(0).padStart(2, "0")}T00:00:00.000Z`,
+              `${v.getFullYear()}-${(v.getDate() + 1).toFixed(0).padStart(2, "0")}-${(v.getMonth() + 1).toFixed(0).padStart(2, "0")}T00:00:00.000`,
             )
           : v;
       }
 
       // @ts-expect-error
-      return new Date(`${v.toString().split("/").reverse().join("-")}T00:00:00.000Z`);
+      return new Date(`${v.toString().split("/").reverse().join("-")}T00:00:00.000`);
     } catch (e) {
       console.log(e);
       return null;
@@ -200,7 +200,7 @@ function List({ nfs }: { nfs: Array<z.infer<typeof nota_fiscal_schema> | { id: n
             </Table.Header>
             <Table.Body items={nfs}>
               {(nf) =>
-                'NumeroNotaFiscal' in nf ? (
+                "NumeroNotaFiscal" in nf ? (
                   <Table.Row>
                     <Table.Cell>{nf.NumeroNotaFiscal}</Table.Cell>
                     <Table.Cell>{nf.Transportador}</Table.Cell>
