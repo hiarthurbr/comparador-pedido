@@ -45,7 +45,7 @@ const StoredNFsData = z.object({
 const Result = z.object({
   corr: z.array(nota_fiscal_schema),
   err: z.array(nota_fiscal_schema),
-  ni: z.array(nota_fiscal_schema),
+  ni: z.array(z.strictObject({ id: z.number() }).or(nota_fiscal_schema)),
 });
 
 async function parseXlsx(buffer: ArrayBuffer) {
@@ -63,6 +63,35 @@ async function parseXlsx(buffer: ArrayBuffer) {
         "Fechamento Geral".toLocaleUpperCase(),
   );
 
+  if (dateWorksheet == null) throw new Error("Date worksheet not found");
+
+  const dates = dateWorksheet.getColumn("A").values;
+
+  const swap_day_month = dates
+    .filter((d) => d instanceof Date)
+    .every((d, _, a) => d.getDate() === a[0].getDate());
+
+  const dates_map = dates.map((v) => {
+    try {
+      if (v instanceof Date) {
+        console.log({ year: v.getFullYear(), month: v.getMonth(), day: v.getDate() });
+        return swap_day_month
+          ? new Date(
+              `${v.getFullYear()}-${(v.getDate() + 1).toFixed(0).padStart(2, "0")}-${(v.getMonth() + 1).toFixed(0).padStart(2, "0")}T00:00:00.000Z`,
+            )
+          : v;
+      }
+
+      // @ts-expect-error
+      return new Date(`${v.toString().split("/").reverse().join("-")}T00:00:00.000Z`);
+    } catch (e) {
+      console.log(e);
+      return null;
+    }
+  });
+
+  console.log({ swap_day_month, dates_map, dates_len: dates.length });
+
   // @ts-expect-error
   globalThis.worksheets = workbook.worksheets.filter((w) => w.state === "visible");
   // @ts-expect-error
@@ -79,39 +108,20 @@ async function parseXlsx(buffer: ArrayBuffer) {
       .flatMap((w) =>
         w
           .getColumn("A")
-          .values.filter((v) => z.coerce.number().safeParse(v).success)
+          .values.map((v) => (typeof v === "string" ? v.trim() : v))
+          .filter((v) => z.coerce.number().safeParse(v).success)
           .map((n) => z.coerce.number().parse(n)),
       ),
     startDate: new Date(
       Math.min(
         // @ts-expect-error
-        ...dateWorksheet
-          .getColumn("A")
-          .values.map((v) => {
-            try {
-              // @ts-expect-error
-              return new Date(v.toString().split("/").reverse().join("-"));
-            } catch {
-              return null;
-            }
-          })
-          .filter((v) => v != null && !Number.isNaN(v.getTime())),
+        ...dates_map.filter((v) => v != null && !Number.isNaN(v.getTime())),
       ),
     ),
     endDate: new Date(
       Math.max(
         // @ts-expect-error
-        ...dateWorksheet
-          .getColumn("A")
-          .values.map((v) => {
-            try {
-              // @ts-expect-error
-              return new Date(v.toString().split("/").reverse().join("-"));
-            } catch {
-              return null;
-            }
-          })
-          .filter((v) => v != null && !Number.isNaN(v.getTime())),
+        ...dates_map.filter((v) => v != null && !Number.isNaN(v.getTime())),
       ),
     ),
   };
@@ -130,15 +140,17 @@ function compareWithStoredData(
       nfe.PrevisaoSaida &&
       nfe.PrevisaoSaida <= xlsxData.endDate,
   );
-  const NFStoreJeferson = NFStore.filter((nfe) => nfe.Transportador?.trim() === "Jeferson");
-  const NFStoreJefersonSet = new Set(NFStoreJeferson.map((nf) => nf.NumeroNotaFiscal));
-  const NFPlaniSet = new Set(xlsxData.nfs);
+  const NFStoreJeferson = NFStore.filter(
+    (nfe) => nfe.Transportador?.trim().toLocaleLowerCase() === "jeferson",
+  );
+  const NFStoreJeferson_nf = NFStoreJeferson.map((nfe) => nfe.NumeroNotaFiscal);
+
   const NFNome = Object.fromEntries(
     NFStore.map((nfe) => [nfe.NumeroNotaFiscal, nfe.Transportador ?? "Nenhum especificado"]),
   );
 
-  const Correct = NFStoreJeferson.filter((nf) => xlsxData.nfs.includes(nf.NumeroNotaFiscal));
-  const NotIncluded = NFStoreJefersonSet.difference(NFPlaniSet);
+  const Correct = xlsxData.nfs.filter((nf) => NFStoreJeferson_nf.includes(nf));
+  const NotIncluded = xlsxData.nfs.filter((nf) => !Correct.includes(nf));
   const NotCorrect = xlsxData.nfs
     .map((nf) => NFStore.find((nfe) => nfe.NumeroNotaFiscal === nf))
     .filter((nf) => nf != null)
@@ -150,22 +162,22 @@ function compareWithStoredData(
     NFNome,
     Correct,
     NotCorrect,
-    NFStoreJefersonSet,
-    NFPlaniSet,
     NotIncluded,
   });
 
   return {
-    corr: Correct.map((nf) => ({ id: nf.NumeroNotaFiscal, ...nf })),
-    err: NotCorrect.map((nf) => ({ id: nf.NumeroNotaFiscal, ...nf })),
-    ni: Array.from(NotIncluded)
-      .map((nf) => storedData.nfs.find((nfe) => nfe.NumeroNotaFiscal === nf))
+    corr: Correct.map((nf) => storedData.nfs.find((nfe) => nfe.NumeroNotaFiscal === nf))
       .filter((nf) => nf != null)
       .map((nf) => ({ id: nf.NumeroNotaFiscal, ...nf })),
+    err: NotCorrect.map((nf) => ({ id: nf.NumeroNotaFiscal, ...nf })),
+    ni: NotIncluded.map((nf) => ({
+      store: storedData.nfs.find((nfe) => nfe.NumeroNotaFiscal === nf),
+      nf,
+    })).map((nf) => (nf.store ? { id: nf.store.NumeroNotaFiscal, ...nf.store } : { id: nf.nf })),
   };
 }
 
-function List({ nfs }: { nfs: Array<z.infer<typeof nota_fiscal_schema>> }) {
+function List({ nfs }: { nfs: Array<z.infer<typeof nota_fiscal_schema> | { id: number }> }) {
   return (
     <Virtualizer
       layout={TableLayout}
@@ -187,158 +199,170 @@ function List({ nfs }: { nfs: Array<z.infer<typeof nota_fiscal_schema>> }) {
               <Table.Column isRowHeader>Expandir</Table.Column>
             </Table.Header>
             <Table.Body items={nfs}>
-              {(nf) => (
-                <Table.Row>
-                  <Table.Cell>{nf.NumeroNotaFiscal}</Table.Cell>
-                  <Table.Cell>{nf.Transportador}</Table.Cell>
-                  <Table.Cell>
-                    <Modal
-                      onOpenChange={(open) => {
-                        open && console.log(nf);
-                      }}
-                    >
-                      <Button variant="secondary" size="sm">
-                        Detalhes
-                      </Button>
-                      <Modal.Backdrop>
-                        <Modal.Container size="cover">
-                          <Modal.Dialog>
-                            <Modal.CloseTrigger />
-                            <Modal.Header>
-                              <AlertCircle className="size-5" />
-                              <Modal.Heading>Detalhes da NFe</Modal.Heading>
-                            </Modal.Header>
-                            <Modal.Body>
-                              <div className="flex flex-col space-y-2">
-                                <div className="flex flex-row space-x-2">
-                                  <Chip variant="soft">{nf.NumeroNotaFiscal}</Chip>
-                                  <Chip
-                                    variant="primary"
-                                    color={nf.Status === "Entregue" ? "success" : "warning"}
-                                  >
-                                    {nf.Status}
-                                  </Chip>
-                                  <Chip
-                                    variant="primary"
-                                    color={nf.Transportador === "Jeferson" ? "success" : "danger"}
-                                  >
-                                    {nf.Transportador}
-                                  </Chip>
-                                </div>
-                                <Separator className="my-4" />
-                                <div className="space-x-2">
-                                  <h3 className="text-lg font-bold">Local de entrega</h3>
-                                  <span>
-                                    Endereço:{" "}
-                                    {nf.EnderecoTransportadora ?? "Endereço não informado"}
-                                  </span>
-                                  {nf.Latitude && nf.Longitude && (
-                                    <Link
-                                      href={`https://www.google.com/maps/search/${nf.Latitude},${nf.Longitude}`}
-                                      target="_blank"
-                                      referrerPolicy="no-referrer"
+              {(nf) =>
+                'NumeroNotaFiscal' in nf ? (
+                  <Table.Row>
+                    <Table.Cell>{nf.NumeroNotaFiscal}</Table.Cell>
+                    <Table.Cell>{nf.Transportador}</Table.Cell>
+                    <Table.Cell>
+                      <Modal
+                        onOpenChange={(open) => {
+                          open && console.log(nf);
+                        }}
+                      >
+                        <Button variant="secondary" size="sm">
+                          Detalhes
+                        </Button>
+                        <Modal.Backdrop>
+                          <Modal.Container size="cover">
+                            <Modal.Dialog>
+                              <Modal.CloseTrigger />
+                              <Modal.Header>
+                                <AlertCircle className="size-5" />
+                                <Modal.Heading>Detalhes da NFe</Modal.Heading>
+                              </Modal.Header>
+                              <Modal.Body>
+                                <div className="flex flex-col space-y-2">
+                                  <div className="flex flex-row space-x-2">
+                                    <Chip variant="soft">{nf.NumeroNotaFiscal}</Chip>
+                                    <Chip
+                                      variant="primary"
+                                      color={nf.Status === "Entregue" ? "success" : "warning"}
                                     >
-                                      Abrir no Maps
-                                      <Link.Icon className="ml-1.5 size-3">
-                                        <ArrowUpRightFromSquareIcon />
-                                      </Link.Icon>
-                                    </Link>
-                                  )}
-                                </div>
-                                {nf.DataEntrega && <Separator className="my-4" />}
-                                {nf.DataEntrega && (
-                                  <div className="flex flex-col space-x-2">
-                                    <h3 className="text-lg font-bold">Data da entrega</h3>
-                                    <Label>Data</Label>
-                                    <Calendar
-                                      isReadOnly
-                                      aria-label="Data de entrega"
-                                      defaultValue={parseAbsoluteToLocal(
-                                        nf.DataEntrega.toISOString(),
-                                      )}
+                                      {nf.Status}
+                                    </Chip>
+                                    <Chip
+                                      variant="primary"
+                                      color={nf.Transportador === "Jeferson" ? "success" : "danger"}
                                     >
-                                      <Calendar.Header>
-                                        <Calendar.Heading />
-                                        <Calendar.NavButton slot="previous" />
-                                        <Calendar.NavButton slot="next" />
-                                      </Calendar.Header>
-                                      <Calendar.Grid>
-                                        <Calendar.GridHeader>
-                                          {(day) => (
-                                            <Calendar.HeaderCell>{day}</Calendar.HeaderCell>
-                                          )}
-                                        </Calendar.GridHeader>
-                                        <Calendar.GridBody>
-                                          {(date) => <Calendar.Cell date={date} />}
-                                        </Calendar.GridBody>
-                                      </Calendar.Grid>
-                                    </Calendar>
-                                    <TimeField
-                                      className="w-[256px]"
-                                      name="time"
-                                      value={parseAbsoluteToLocal(nf.DataEntrega.toISOString())}
-                                    >
-                                      <Label>Hora</Label>
-                                      <TimeField.Group>
-                                        <TimeField.Prefix>
-                                          <ClockIcon className="size-4 text-muted" />
-                                        </TimeField.Prefix>
-                                        <TimeField.Input>
-                                          {(segment) => <TimeField.Segment segment={segment} />}
-                                        </TimeField.Input>
-                                      </TimeField.Group>
-                                    </TimeField>
+                                      {nf.Transportador}
+                                    </Chip>
                                   </div>
-                                )}
-                                <Separator className="my-4" />
-                                <Disclosure>
-                                  <Disclosure.Heading>
-                                    <Button slot="trigger" variant="secondary">
-                                      Detalhes da nota
-                                      <Disclosure.Indicator />
-                                    </Button>
-                                  </Disclosure.Heading>
-                                  <Disclosure.Content>
-                                    <Disclosure.Body>
-                                      <Table>
-                                        <Table.ScrollContainer>
-                                          <Table.Content aria-label="Detalhes da nota">
-                                            <Table.Header>
-                                              <Table.Column allowsSorting isRowHeader>
-                                                Chave
-                                              </Table.Column>
-                                              <Table.Column allowsSorting isRowHeader>
-                                                Valor
-                                              </Table.Column>
-                                            </Table.Header>
-                                            <Table.Body>
-                                              {Object.entries(nf).map(([key, value]) => (
-                                                <Table.Row key={key}>
-                                                  <Table.Cell>{key}</Table.Cell>
-                                                  <Table.Cell>{value?.toString()}</Table.Cell>
-                                                </Table.Row>
-                                              ))}
-                                            </Table.Body>
-                                          </Table.Content>
-                                        </Table.ScrollContainer>
-                                      </Table>
-                                    </Disclosure.Body>
-                                  </Disclosure.Content>
-                                </Disclosure>
-                              </div>
-                            </Modal.Body>
-                            <Modal.Footer>
-                              <Button className="w-full" slot="close">
-                                Fechar
-                              </Button>
-                            </Modal.Footer>
-                          </Modal.Dialog>
-                        </Modal.Container>
-                      </Modal.Backdrop>
-                    </Modal>
-                  </Table.Cell>
-                </Table.Row>
-              )}
+                                  <Separator className="my-4" />
+                                  <div className="space-x-2">
+                                    <h3 className="text-lg font-bold">Local de entrega</h3>
+                                    <span>
+                                      Endereço:{" "}
+                                      {nf.EnderecoTransportadora ?? "Endereço não informado"}
+                                    </span>
+                                    {nf.Latitude && nf.Longitude && (
+                                      <Link
+                                        href={`https://www.google.com/maps/search/${nf.Latitude},${nf.Longitude}`}
+                                        target="_blank"
+                                        referrerPolicy="no-referrer"
+                                      >
+                                        Abrir no Maps
+                                        <Link.Icon className="ml-1.5 size-3">
+                                          <ArrowUpRightFromSquareIcon />
+                                        </Link.Icon>
+                                      </Link>
+                                    )}
+                                  </div>
+                                  {nf.DataEntrega && <Separator className="my-4" />}
+                                  {nf.DataEntrega && (
+                                    <div className="flex flex-col space-x-2">
+                                      <h3 className="text-lg font-bold">Data da entrega</h3>
+                                      <Label>Data</Label>
+                                      <Calendar
+                                        isReadOnly
+                                        aria-label="Data de entrega"
+                                        defaultValue={parseAbsoluteToLocal(
+                                          nf.DataEntrega.toISOString(),
+                                        )}
+                                      >
+                                        <Calendar.Header>
+                                          <Calendar.Heading />
+                                          <Calendar.NavButton slot="previous" />
+                                          <Calendar.NavButton slot="next" />
+                                        </Calendar.Header>
+                                        <Calendar.Grid>
+                                          <Calendar.GridHeader>
+                                            {(day) => (
+                                              <Calendar.HeaderCell>{day}</Calendar.HeaderCell>
+                                            )}
+                                          </Calendar.GridHeader>
+                                          <Calendar.GridBody>
+                                            {(date) => <Calendar.Cell date={date} />}
+                                          </Calendar.GridBody>
+                                        </Calendar.Grid>
+                                      </Calendar>
+                                      <TimeField
+                                        className="w-[256px]"
+                                        name="time"
+                                        value={parseAbsoluteToLocal(nf.DataEntrega.toISOString())}
+                                      >
+                                        <Label>Hora</Label>
+                                        <TimeField.Group>
+                                          <TimeField.Prefix>
+                                            <ClockIcon className="size-4 text-muted" />
+                                          </TimeField.Prefix>
+                                          <TimeField.Input>
+                                            {(segment) => <TimeField.Segment segment={segment} />}
+                                          </TimeField.Input>
+                                        </TimeField.Group>
+                                      </TimeField>
+                                    </div>
+                                  )}
+                                  <Separator className="my-4" />
+                                  <Disclosure>
+                                    <Disclosure.Heading>
+                                      <Button slot="trigger" variant="secondary">
+                                        Detalhes da nota
+                                        <Disclosure.Indicator />
+                                      </Button>
+                                    </Disclosure.Heading>
+                                    <Disclosure.Content>
+                                      <Disclosure.Body>
+                                        <Table>
+                                          <Table.ScrollContainer>
+                                            <Table.Content aria-label="Detalhes da nota">
+                                              <Table.Header>
+                                                <Table.Column allowsSorting isRowHeader>
+                                                  Chave
+                                                </Table.Column>
+                                                <Table.Column allowsSorting isRowHeader>
+                                                  Valor
+                                                </Table.Column>
+                                              </Table.Header>
+                                              <Table.Body>
+                                                {Object.entries(nf).map(([key, value]) => (
+                                                  <Table.Row key={key}>
+                                                    <Table.Cell>{key}</Table.Cell>
+                                                    <Table.Cell>{value?.toString()}</Table.Cell>
+                                                  </Table.Row>
+                                                ))}
+                                              </Table.Body>
+                                            </Table.Content>
+                                          </Table.ScrollContainer>
+                                        </Table>
+                                      </Disclosure.Body>
+                                    </Disclosure.Content>
+                                  </Disclosure>
+                                </div>
+                              </Modal.Body>
+                              <Modal.Footer>
+                                <Button className="w-full" slot="close">
+                                  Fechar
+                                </Button>
+                              </Modal.Footer>
+                            </Modal.Dialog>
+                          </Modal.Container>
+                        </Modal.Backdrop>
+                      </Modal>
+                    </Table.Cell>
+                  </Table.Row>
+                ) : (
+                  <Table.Row>
+                    <Table.Cell>{nf.id}</Table.Cell>
+                    <Table.Cell>Desconhecido</Table.Cell>
+                    <Table.Cell>
+                      <Button variant="secondary" size="sm" isDisabled>
+                        NF não encontrada
+                      </Button>
+                    </Table.Cell>
+                  </Table.Row>
+                )
+              }
             </Table.Body>
           </Table.Content>
         </Table.ScrollContainer>
