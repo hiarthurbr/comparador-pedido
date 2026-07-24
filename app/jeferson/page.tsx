@@ -76,7 +76,12 @@ async function parseXlsx(buffer: ArrayBuffer) {
           w.findCell("A1", 0)?.value?.toString().trim().toLocaleUpperCase() ===
             "FECHAMENTO JEFFTRANSPORTE",
       )
-      .flatMap((w) => w.getColumn("A").values.filter((v) => typeof v === "number")),
+      .flatMap((w) =>
+        w
+          .getColumn("A")
+          .values.filter((v) => z.coerce.number().safeParse(v).success)
+          .map((n) => z.coerce.number().parse(n)),
+      ),
     startDate: new Date(
       Math.min(
         // @ts-expect-error

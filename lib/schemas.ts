@@ -158,7 +158,7 @@ export const nota_fiscal_schema = z.object({
   Transportadora: z.string().optional(),
   EnderecoTransportadora: z.string().optional(),
   BairroTransportadora: z.string().optional(),
-  Status: z.enum(["Entregue", "Pendente"]),
+  Status: z.enum(["Entregue", "Pendente", "Coletado"]),
   DataEntrega: z.coerce.date().or(z.date()).optional(),
   DataColeta: z.coerce.date().or(z.date()).optional(),
   UsuarioColeta: z.string().optional(),
