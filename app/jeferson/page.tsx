@@ -149,7 +149,11 @@ function compareWithStoredData(
     NFStore.map((nfe) => [nfe.NumeroNotaFiscal, nfe.Transportador ?? "Nenhum especificado"]),
   );
 
-  const Correct = xlsxData.nfs.filter((nf) => NFStoreJeferson_nf.includes(nf));
+  const Correct = xlsxData.nfs.filter(
+    (nf) =>
+      NFStoreJeferson_nf.includes(nf) &&
+      NFStoreJeferson.find((nfe) => nfe.NumeroNotaFiscal === nf)?.Tipo === 2,
+  );
   const NotIncluded = xlsxData.nfs
     .filter((nf) => !Correct.includes(nf))
     .map((nf) => NFStore.find((nfe) => nfe.NumeroNotaFiscal === nf))
@@ -203,7 +207,14 @@ function List({ nfs }: { nfs: Array<z.infer<typeof nota_fiscal_schema> | { id: n
               {(nf) =>
                 "NumeroNotaFiscal" in nf ? (
                   <Table.Row>
-                    <Table.Cell>{nf.NumeroNotaFiscal}</Table.Cell>
+                    <Table.Cell>
+                      <div className="inline-flex space-x-3 w-full items-center">
+                        <span>{nf.NumeroNotaFiscal}</span>
+                        <Chip color={nf.Tipo === 2 ? "success" : "danger"}>
+                          {nf.Tipo === 2 ? "Entrega" : "Coleta"}
+                        </Chip>
+                      </div>
+                    </Table.Cell>
                     <Table.Cell>{nf.Transportador}</Table.Cell>
                     <Table.Cell>
                       <Modal
@@ -412,14 +423,11 @@ export default function JefersonPage() {
   const handleUpdateStorage = useCallback(async () => {
     setIsUpdating(true);
     try {
-      const nfs: Array<z.infer<typeof nota_fiscal_schema>> = await fetch(
-        "/jeferson/notas",
-        {
-          headers: {
-            accept: "application/json, text/plain, */*",
-          },
+      const nfs: Array<z.infer<typeof nota_fiscal_schema>> = await fetch("/jeferson/notas", {
+        headers: {
+          accept: "application/json, text/plain, */*",
         },
-      )
+      })
         .then((r) => r.json())
         .then((r) => r.data)
         .then(z.array(nota_fiscal_schema).parseAsync);
