@@ -413,14 +413,11 @@ export default function JefersonPage() {
     setIsUpdating(true);
     try {
       const nfs: Array<z.infer<typeof nota_fiscal_schema>> = await fetch(
-        "https://api-erp.rainhadassete.com.br/api/expedicao/notas-kanban",
+        "/jeferson/notas",
         {
           headers: {
             accept: "application/json, text/plain, */*",
           },
-          referrer: "https://rainhaerp.rainhadassete.com.br/",
-          body: null,
-          method: "GET",
         },
       )
         .then((r) => r.json())
