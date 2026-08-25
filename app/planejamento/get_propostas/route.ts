@@ -82,8 +82,8 @@ export async function GET() {
                 .reduce(
                   (i_cum, i) =>
                     i_cum +
-                    i.quantidadeItemProposta /
-                      (skus[i.partNumberProduto as keyof typeof skus] ?? 1),
+                    Math.ceil(i.quantidadeItemProposta) /
+                      Math.max(1, skus[i.partNumberProduto as keyof typeof skus] ?? 1),
                   0,
                 ),
             })),
