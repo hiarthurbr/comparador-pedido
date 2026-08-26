@@ -18,6 +18,7 @@ const PropostasStatusPDASchema = z.object({
   descricaoStatusPda: z.string(),
   ePrioridade: z.boolean(),
   critico: z.boolean(),
+  dataProgramada: z.coerce.date().optional(),
   programada: z.stringbool({
     truthy: ["sim"],
     falsy: ["nao", "não"],
