@@ -14,6 +14,7 @@ const kardex_itens = z
         tipo: z.literal("Movimentação"),
         endereco: z.string(),
         produto: z.string().optional(),
+        descricaoProduto: z.string().optional(),
         quantidade: z.number(),
         usuario: z.string(),
         deposito: z.string(),
