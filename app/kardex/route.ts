@@ -55,6 +55,10 @@ export async function GET() {
     .then((r) => r.json())
     .then(kardex_n_itens.parseAsync);
 
+  const past_year = new Date();
+  past_year.setFullYear(past_year.getFullYear() - 1);
+  past_year.setHours(0, 0, 0, 0);
+
   return fetch(
     `https://api.pdahub.com.br/api/Relatorio/KardexV2?CodigoCliente=30&pagina=1&quantidadePorPagina=${n_itens}&produto=&tipo=Movimenta%C3%A7%C3%A3o`,
     {
@@ -73,6 +77,6 @@ export async function GET() {
   )
     .then((r) => r.json())
     .then(kardex_itens.parseAsync)
-    .then((itens) => itens.filter((i) => i.deposito === "Picking"))
+    .then((itens) => itens.filter((i) => i.deposito === "Picking" && i.data >= past_year))
     .then(Response.json);
 }
