@@ -6,7 +6,7 @@ const PropostasStatusPDASchema = z.object({
   numeroProposta: z.string(),
   nomeEmpresa: z.string(),
   nomeVendedor: z.string(),
-  dataLiberacaoProposta: z.coerce.date(),
+  dataLiberacaoProposta: z.coerce.date().or(z.date()),
   liquidoProposta: z.number(),
   vinculos: z.int().gte(0),
   itensDiferentesTotalProposta: z.int().gte(0),
@@ -18,7 +18,7 @@ const PropostasStatusPDASchema = z.object({
   descricaoStatusPda: z.string(),
   ePrioridade: z.boolean(),
   critico: z.boolean(),
-  dataProgramada: z.coerce.date().optional(),
+  dataProgramada: z.coerce.date().or(z.date()).optional(),
   programada: z.stringbool({
     truthy: ["sim"],
     falsy: ["nao", "não"],
