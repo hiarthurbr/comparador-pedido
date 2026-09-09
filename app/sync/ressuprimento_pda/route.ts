@@ -10,8 +10,7 @@ const PedidoSchema = z
   .transform((obj) => {
     const [codigoPedido, codigoRelativo_] = obj.codigoPedido.split("/").map((s) => s.trim());
     const codigoRelativo = codigoRelativo_ ?? codigoPedido;
-    const vinculo =
-      codigoRelativo_ != null && !codigoRelativo_.startsWith(codigoPedido);
+    const vinculo = codigoRelativo_ != null && !codigoRelativo_.startsWith(codigoPedido);
 
     return {
       ...obj,
@@ -29,6 +28,17 @@ const RessuprimentoSchema = z.object({
   produto: z.string(),
   quantidade: z.number(),
   quantidadeEndereco: z.number(),
+});
+
+const ItensPropostaSchema = z.strictObject({
+  codigoItemProposta: z.int(),
+  nomeProduto: z.string(),
+  partNumberProduto: z.string(),
+  quantidadeItemProposta: z.number(),
+  liquidoUnitario: z.number(),
+  liquidoTotal: z.number(),
+  statusItemProposta: z.int(),
+  itemVendaPerdida: z.int().optional(),
 });
 
 export async function GET() {
@@ -102,7 +112,39 @@ export async function GET() {
           })
             .then((r) => r.json())
             .then(RessuprimentoSchema.array().parseAsync)
-            .then((itens) => ({ ...pedido, itens })),
+            .then((itens) => ({ ...pedido, itens }))
+            .then((pedido) =>
+              fetch(
+                `https://api-erp.rainhadassete.com.br/api/expedicao/itens-proposta/${pedido.codigoPedido}`,
+                {
+                  headers: {
+                    accept: "application/json, text/plain, */*",
+                    "accept-language": "pt-BR,pt;q=0.9",
+                    "cache-control": "no-cache",
+                    pragma: "no-cache",
+                    priority: "u=1, i",
+                  },
+                  referrer: "https://rainhaerp.rainhadassete.com.br/",
+                  body: null,
+                  method: "GET",
+                },
+              )
+                .then((r) => r.json())
+                .then(ItensPropostaSchema.array().parseAsync)
+                .then((itens) => ({
+                  ...pedido,
+                  itens: pedido.itens.map((item) => ({
+                    ...item,
+                    quantidadeTotal: itens
+                      .filter(
+                        (item_) =>
+                          item_.itemVendaPerdida == null &&
+                          item_.partNumberProduto === item.produto,
+                      )
+                      .reduce((cum, a) => cum + a.quantidadeItemProposta, 0),
+                  })),
+                })),
+            ),
         ),
       ),
     )
