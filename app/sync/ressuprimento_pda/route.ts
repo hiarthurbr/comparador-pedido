@@ -1,11 +1,25 @@
 import z from "zod";
 import { getTokenNoLocal } from "@/lib/pda";
 
-const PedidoSchema = z.object({
-  codigoPedido: z.string().transform((str) => str.split(" ")[0]),
-  cliente: z.string(),
-  descricaoStatus: z.string(),
-});
+const PedidoSchema = z
+  .object({
+    codigoPedido: z.string(),
+    cliente: z.string(),
+    descricaoStatus: z.string(),
+  })
+  .transform((obj) => {
+    const [codigoPedido, codigoRelativo_] = obj.codigoPedido.split("/").map((s) => s.trim());
+    const codigoRelativo = codigoRelativo_ ?? codigoPedido;
+    const vinculo =
+      codigoRelativo_ != null && !codigoRelativo_.startsWith(codigoPedido);
+
+    return {
+      ...obj,
+      codigoPedido,
+      codigoRelativo,
+      vinculo,
+    };
+  });
 
 const RessuprimentoSchema = z.object({
   origem: z.string(),
