@@ -3,6 +3,20 @@ import { dashboard_data_schema, type status_pedido_pda_enum, token_schema } from
 
 const TOKEN_KEY = "PDA:TOKEN";
 
+export async function getTokenNoLocal() {
+  return fetch("https://api.pdahub.com.br/api/Autenticacao", {
+    headers: {
+      accept: "application/json, text/plain, */*",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ Login: "arthur.bufalo" }),
+    method: "POST",
+  })
+    .then((r) => r.json())
+    .then(token_schema.parseAsync)
+    .then((token) => `Bearer ${token.accessToken}` as const);
+}
+
 export async function getToken() {
   const curr_token = token_schema.safeParse(JSON.parse(localStorage.getItem(TOKEN_KEY) ?? "{}"));
   if (!curr_token.success || new Date() > new Date(curr_token.data.expiration)) {
